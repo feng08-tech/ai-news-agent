@@ -91,8 +91,8 @@ def summarize_with_ai(news_list, query):
         return error_chunk()
 
 def generate_image(prompt):
-    return "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=800&auto=format&fit=crop"
-
+    encoded_prompt = urllib.parse.quote(prompt)
+    return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=400&nologo=true"
 def send_to_dingtalk(title, text):
     timestamp = str(round(time.time() * 1000))
     secret_enc = DINGTALK_SECRET.encode('utf-8')
