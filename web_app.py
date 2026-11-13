@@ -54,28 +54,28 @@ with st.sidebar:
 
 user_topic = st.text_input("你想让 AI 关注什么主题？", value="今日最新的 AI 行业新闻")
 
-def fetch_news(query):
-    url = "https://tech.sina.com.cn/"
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.encoding = 'utf-8'
-        soup = BeautifulSoup(response.text, 'html.parser')
-        news_list = []
-        for a_tag in soup.find_all('a'):
-            title = a_tag.get_text(strip=True)
-            if title and len(title) > 10:
-                news_list.append({"title": title})
-            if len(news_list) >= 5: break
-        if news_list: return news_list
-        else: return [{"title": f"未抓取到网页标题，请基于知识库生成关于【{query}】的总结。"}]
-    except Exception:
-        return [{"title": f"网络波动，请基于知识库生成关于【{query}】的总结。"}]
+persona = st.selectbox("选择 AI 的人设：", ["资深科技主编", "幽默段子手", "小红书爆款文案", "暴躁老哥"])
+import feedparser
 
+def fetch_news(query):
+    # 使用 BBC 中文网的 RSS 源，极其稳定，不会被反爬拦截
+    rss_url = "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml"
+    try:
+        feed = feedparser.parse(rss_url)
+        news_list = []
+        # 提取前 5 条真实新闻
+        for entry in feed.entries[:5]:
+            news_list.append({"title": entry.title})
+        if news_list:
+            return news_list
+        else:
+            return [{"title": f"未抓取到新闻，请基于知识库生成关于【{query}】的总结。"}]
+    except Exception as e:
+        return [{"title": f"网络异常({e})，请基于知识库生成关于【{query}】的总结。"}]
 def summarize_with_ai(news_list, query):
     news_text = "\n".join([f"- {item['title']}" for item in news_list])
     client = OpenAI(api_key=os.getenv("ANTHROPIC_API_KEY"), base_url="https://api.deepseek.com", timeout=60.0)
-    prompt = f"你是一个资深科技主编。请围绕【{query}】，根据以下信息写一段 150 字左右的简报。\n参考：\n{news_text}"
+    prompt = f"你现在的身份是【{persona}】。请围绕【{query}】，根据以下信息写一段 150 字左右的简报。\n参考：\n{news_text}"
     try:
         response = client.chat.completions.create(
             model="deepseek-chat", messages=[{"role": "user", "content": prompt}], temperature=0.7, stream=True
@@ -130,9 +130,20 @@ if st.button("🚀 立即生成并推送简报", type="primary"):
                 save_history(user_topic, full_summary)
                 st.toast("✅ 已自动保存到历史记录库", icon="💾")
                 
+                # 👇 下载按钮（注意它和上面的 save_history 对齐）
+                st.download_button(
+                    label="📥 下载这份简报 (.md格式)",
+                    data=full_summary,
+                    file_name=f"AI简报_{user_topic}_{persona}.md",
+                    mime="text/markdown"
+                )
+                
                 with st.spinner("正在推送到钉钉..."):
+                    # 👇 下面这行就是报错的那行，保证它的缩进是在 with 内部
                     if send_to_dingtalk(f"【{user_topic}】简报", full_summary):
                         st.balloons() 
                         st.success("🎉 钉钉推送成功，请查看手机！")
                     else:
                         st.error("❌ 钉钉推送失败。")
+                     
+                   
