@@ -1,5 +1,3 @@
-import edge_tts
-import asyncio
 import streamlit as st
 import os
 import requests
@@ -14,16 +12,25 @@ from dotenv import load_dotenv
 from datetime import datetime
 import feedparser
 import edge_tts
+import asyncio
 import nest_asyncio
-import io
 
 load_dotenv()
+nest_asyncio.apply()
 
 # ================= 配置区域 =================
-# ⚠️ 关键：把这里换成你真实的钉钉 Webhook 和 Secret
-DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=69b36940ef9ba884b92503cd7d948f8d702976e6824a393cfba46d56daaae596"
-DINGTALK_SECRET = "SEC49f300fbb22571d34706711d9f777f53347e58141f008667a989e2f8b3c4f7a1"
+# ⚠️ 请把下面引号里的内容换成你自己的真实钉钉数据！
+DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=69b36940ef9ba884b92503cd7d948f8d702976e6824a393cfba46d56daaae596
+DINGTALK_SECRET = "SEC49f300fbb22571d34706711d9f777f53347e58141f008667a989e2f8b3c4f7a1
 # ============================================
+
+# 尝试从 Streamlit Cloud 的 Secrets 中读取密钥
+try:
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
+    base_url = st.secrets.get("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
+except Exception:
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
 
 st.set_page_config(page_title="AI 新闻秘书 6.0", page_icon="🧠", layout="wide", initial_sidebar_state="collapsed")
 st.title("🧠 我的 AI 新闻秘书 6.0")
@@ -65,7 +72,9 @@ persona = st.selectbox("选择 AI 的人设：", ["资深科技主编", "幽默�
 def fetch_news(query):
     rss_url = "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml"
     try:
-        feed = feedparser.parse(rss_url)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(rss_url, headers=headers, timeout=10)
+        feed = feedparser.parse(response.text)
         news_list = []
         for entry in feed.entries[:5]:
             news_list.append({"title": entry.title})
@@ -78,7 +87,7 @@ def fetch_news(query):
 
 def summarize_with_ai(news_list, query):
     news_text = "\n".join([f"- {item['title']}" for item in news_list])
-    client = OpenAI(api_key=os.getenv("ANTHROPIC_API_KEY"), base_url="https://api.deepseek.com", timeout=60.0)
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0)
     prompt = f"你现在的身份是【{persona}】。请围绕【{query}】，根据以下信息写一段 150 字左右的简报。\n参考：\n{news_text}"
     try:
         response = client.chat.completions.create(
@@ -101,29 +110,14 @@ def generate_image(prompt):
 def text_to_speech(text):
     voice = "zh-CN-XiaoxiaoNeural" 
     output_file = "output.mp3"
-    
     async def _generate():
         communicate = edge_tts.Communicate(text, voice)
         await communicate.save(output_file)
-        
     asyncio.run(_generate())
-    
     with open(output_file, "rb") as f:
         audio_data = f.read()
-        
-    return audio_data    
-    async def _generate():
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(output_file)
-        
-    # 运行异步任务
-    asyncio.run(_generate())
-    
-    # 读取生成的音频文件
-    with open(output_file, "rb") as f:
-        audio_data = f.read()
-        
     return audio_data
+
 def send_to_dingtalk(title, text):
     timestamp = str(round(time.time() * 1000))
     secret_enc = DINGTALK_SECRET.encode('utf-8')
