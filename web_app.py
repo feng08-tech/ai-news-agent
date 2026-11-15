@@ -1,3 +1,5 @@
+import edge_tts
+import asyncio
 import streamlit as st
 import os
 import requests
@@ -10,20 +12,23 @@ import urllib.parse
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime
-from bs4 import BeautifulSoup
+import feedparser
+from gtts import gTTS
+import io
 
 load_dotenv()
 
 # ================= 配置区域 =================
-# ⚠️ 请把下面引号里的内容换成你自己的真实数据！
+# ⚠️ 关键：把这里换成你真实的钉钉 Webhook 和 Secret
 DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=69b36940ef9ba884b92503cd7d948f8d702976e6824a393cfba46d56daaae596"
 DINGTALK_SECRET = "SEC49f300fbb22571d34706711d9f777f53347e58141f008667a989e2f8b3c4f7a1"
 # ============================================
 
-st.set_page_config(page_title="AI 新闻秘书", page_icon="🧠", layout="wide", initial_sidebar_state="collapsed")
-st.title("🧠 我的 AI 新闻秘书 5.0")
-st.write("点击下方按钮，AI 会生成简报、自动配图并推送到钉钉！")
+st.set_page_config(page_title="AI 新闻秘书 6.0", page_icon="🧠", layout="wide", initial_sidebar_state="collapsed")
+st.title("🧠 我的 AI 新闻秘书 6.0")
+st.write("点击下方按钮，AI 会生成简报、自动配图、语音播报并推送到钉钉！")
 
+# ================= 历史记录管理模块 =================
 HISTORY_FILE = "history.json"
 def load_history():
     if os.path.exists(HISTORY_FILE):
@@ -52,26 +57,24 @@ with st.sidebar:
                 os.remove(HISTORY_FILE)
                 st.rerun()
 
+# ================= 核心功能 =================
 user_topic = st.text_input("你想让 AI 关注什么主题？", value="今日最新的 AI 行业新闻")
-
 persona = st.selectbox("选择 AI 的人设：", ["资深科技主编", "幽默段子手", "小红书爆款文案", "暴躁老哥"])
-import feedparser
 
 def fetch_news(query):
-    # 使用 BBC 中文网的 RSS 源，极其稳定，不会被反爬拦截
     rss_url = "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml"
     try:
         feed = feedparser.parse(rss_url)
         news_list = []
-        # 提取前 5 条真实新闻
         for entry in feed.entries[:5]:
             news_list.append({"title": entry.title})
         if news_list:
             return news_list
         else:
-            return [{"title": f"未抓取到新闻，请基于知识库生成关于【{query}】的总结。"}]
+            return [{"title": f"未抓取到新闻，请基于知识库生成关于 {query} 的总结。"}]
     except Exception as e:
-        return [{"title": f"网络异常({e})，请基于知识库生成关于【{query}】的总结。"}]
+        return [{"title": f"网络异常 {e}，请基于知识库生成关于 {query} 的总结。"}]
+
 def summarize_with_ai(news_list, query):
     news_text = "\n".join([f"- {item['title']}" for item in news_list])
     client = OpenAI(api_key=os.getenv("ANTHROPIC_API_KEY"), base_url="https://api.deepseek.com", timeout=60.0)
@@ -93,6 +96,24 @@ def summarize_with_ai(news_list, query):
 def generate_image(prompt):
     encoded_prompt = urllib.parse.quote(prompt)
     return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=400&nologo=true"
+
+def text_to_speech(text):
+    # 使用微软 Edge TTS，无需翻墙，音质极佳
+    voice = "zh-CN-XiaoxiaoNeural" # 晓晓女声，也可以用 zh-CN-YunxiNeural (云希男声)
+    output_file = "output.mp3"
+    
+    async def _generate():
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(output_file)
+        
+    # 运行异步任务
+    asyncio.run(_generate())
+    
+    # 读取生成的音频文件
+    with open(output_file, "rb") as f:
+        audio_data = f.read()
+        
+    return audio_data
 def send_to_dingtalk(title, text):
     timestamp = str(round(time.time() * 1000))
     secret_enc = DINGTALK_SECRET.encode('utf-8')
@@ -109,6 +130,7 @@ def send_to_dingtalk(title, text):
     except Exception:
         return False
 
+# ================= 网页界面 =================
 if st.button("🚀 立即生成并推送简报", type="primary"):
     if not user_topic:
         st.warning("请先输入主题！")
@@ -127,10 +149,13 @@ if st.button("🚀 立即生成并推送简报", type="primary"):
                     image_url = generate_image(f"{user_topic}, technology")
                     st.image(image_url, caption="科技感新闻简报", use_container_width=True)
                 
+                with st.spinner("🎙️ 正在生成语音..."):
+                    audio_file = text_to_speech(full_summary)
+                    st.audio(audio_file, format='audio/mp3')
+                
                 save_history(user_topic, full_summary)
                 st.toast("✅ 已自动保存到历史记录库", icon="💾")
                 
-                # 👇 下载按钮（注意它和上面的 save_history 对齐）
                 st.download_button(
                     label="📥 下载这份简报 (.md格式)",
                     data=full_summary,
@@ -139,11 +164,8 @@ if st.button("🚀 立即生成并推送简报", type="primary"):
                 )
                 
                 with st.spinner("正在推送到钉钉..."):
-                    # 👇 下面这行就是报错的那行，保证它的缩进是在 with 内部
                     if send_to_dingtalk(f"【{user_topic}】简报", full_summary):
                         st.balloons() 
                         st.success("🎉 钉钉推送成功，请查看手机！")
                     else:
-                        st.error("❌ 钉钉推送失败。")
-                     
-                   
+                        st.error("❌ 钉钉推送失败，请检查配置。")
