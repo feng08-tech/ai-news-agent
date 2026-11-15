@@ -20,15 +20,15 @@ except Exception:
 
 st.set_page_config(page_title="AI 智能新闻主编", page_icon="📰", layout="centered")
 st.title("📰 AI 智能新闻主编")
-st.write("一键抓取三大媒体最新资讯，由 DeepSeek 为你提炼核心事件（附原文链接）！")
+st.write("一键抓取全球媒体最新资讯，由 DeepSeek 为你提炼核心政治与军事事件（附原文链接）！")
 
-# 换成了你想要的国际政治与军事信源
+# 国际政治与军事信源
 feeds = {
-    "Defense News": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
-    "Reuters": "https://www.reuters.com/arc/outboundfeeds/v3/all/?outputType=xml",
-    "Al Jazeera": "https://www.aljazeera.com/xml/rss/all.xml",
-    "BBC World": "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "The War Zone": "https://www.thedrive.com/the-war-zone/rss"
+    "Defense News (防务)": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
+    "Reuters (路透社)": "https://www.reuters.com/arc/outboundfeeds/v3/all/?outputType=xml",
+    "Al Jazeera (半岛)": "https://www.aljazeera.com/xml/rss/all.xml",
+    "BBC World (国际)": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "The War Zone (战区)": "https://www.thedrive.com/the-war-zone/rss"
 }
 
 headers = {
@@ -49,11 +49,10 @@ def fetch_all_news():
             if feed.entries:
                 for entry in feed.entries[:3]: 
                     title = entry.title
-                    link = entry.link  # 🌟 提取原文链接
+                    link = entry.link
                     summary = clean_html(entry.get('summary', '暂无摘要'))
                     if len(summary) > 100:
                         summary = summary[:100] + "..."
-                    # 🌟 拼接成带链接的格式
                     all_news_text += f"【{name}】 [{title}]({link}) - {summary}\n"
         except Exception:
             pass 
@@ -66,16 +65,18 @@ def generate_ai_summary(news_text):
         timeout=60.0
     )
     
+    # 强化政治与军事的 Prompt
     prompt = f"""你是一个资深的国际政治与军事战略分析师。
 请根据以下抓取的最新新闻素材，为我写一份“今日全球局势简报”。
 要求：
-1. 挑出最重要、最具战略价值的 3 件事，**必须兼顾国际政治动向（如外交博弈、大选、制裁）与军事冲突（如地区战争、军备部署）**。
+1. 挑出最重要、最具战略价值的 3 件事，必须兼顾国际政治动向（如外交博弈、大选、制裁）与军事冲突（如地区战争、军备部署）。
 2. 语气专业、客观、精炼。
-3. 用 Markdown 列表输出，每条提炼一个醒目标题，并且**必须保留原始素材中的链接格式**，以便我点击查看原文。
+3. 用 Markdown 列表输出，每条提炼一个醒目标题，并且必须保留原始素材中的链接格式，以便我点击查看原文。
 
 新闻素材：
 {news_text}
-"""    try:
+"""
+    try:
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[{"role": "user", "content": prompt}],
@@ -96,10 +97,9 @@ if st.button("🚀 一键抓取并生成今日简报", type="primary", use_conta
             
             st.success("✅ 今日简报生成完毕！")
             st.divider()
-            st.markdown(summary) # 因为保留了 Markdown 语法，这里渲染出来链接就是可点击的蓝色字体
+            st.markdown(summary) 
             st.divider()
             
-            # 原始素材也变成可点击的 Markdown 格式
             with st.expander("🔍 查看抓取到的原始新闻素材（可点击原文）"):
                 st.markdown(raw_news)
     else:
