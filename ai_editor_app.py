@@ -25,11 +25,13 @@ st.title("📰 AI 智能新闻主编")
 st.write("一键抓取三大科技媒体最新资讯，由 DeepSeek 为你提炼今日最核心的 3 条大事件！")
 
 feeds = {
-    "IT之家 (科技)": "https://www.ithome.com/rss/",
-    "Solidot (奇客)": "https://www.solidot.org/index.rss",
-    "少数派 (数字生活)": "https://sspai.com/feed"
+    "Defense News (防务新闻)": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
+    "Reuters (路透地缘政治)": "https://www.reuters.com/arc/outboundfeeds/v3/all/?outputType=xml",
+    "Al Jazeera (半岛电视台)": "https://www.aljazeera.com/xml/rss/all.xml",
+    "BBC World (BBC国际)": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "The War Zone (战区)": "https://www.thedrive.com/the-war-zone/rss",
+    "ISW (战争研究所)": "https://www.understandingwar.org/feeds/all.xml"
 }
-
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
