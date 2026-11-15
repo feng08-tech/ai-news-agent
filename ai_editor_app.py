@@ -6,16 +6,14 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# 加载本地环境变量（用于本地开发）
+# 加载本地环境变量
 load_dotenv()
 
 # ================= 核心：自动读取云端/本地密钥 =================
 try:
-    # 优先从 Streamlit Cloud 的 Secrets 读取
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     base_url = st.secrets.get("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
 except Exception:
-    # 本地运行时的回退方案
     api_key = os.getenv("ANTHROPIC_API_KEY")
     base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
 # ================================================================
@@ -42,35 +40,32 @@ headers = {
 }
 
 def clean_html(raw_html):
-    """清理网页的 HTML 标签"""
     cleanr = re.compile('<.*?>')
     cleantext = re.sub(cleanr, '', raw_html)
     return cleantext.strip()
 
 def fetch_all_news():
-    """抓取并拼接新闻素材"""
     all_news_text = ""
     for name, url in feeds.items():
         try:
             response = requests.get(url, headers=headers, timeout=10)
             feed = feedparser.parse(response.text)
             if feed.entries:
-                # 每个源抓取前 8 条，既能看全，又不至于让网络卡死
+                # 每个源抓取 8 条，保留足够的原素材
                 for entry in feed.entries[:8]: 
                     title = entry.title
                     link = entry.link
                     summary = clean_html(entry.get('summary', '暂无摘要'))
                     if len(summary) > 100:
                         summary = summary[:100] + "..."
-                    # 拼接成带原文链接的格式
-                    all_news_text += f"【{name}】 [{title}]({link}) - {summary}\n"
+                    
+                    # 拼装素材，格式： 【媒体】 标题 | 链接 | 摘要
+                    all_news_text += f"【{name}】 【{title}】 (原文链接: {link}) - {summary}\n"
         except Exception:
-            # 个别源超时或失败直接跳过，不影响整体
             pass 
     return all_news_text
 
 def generate_ai_summary(news_text):
-    """调用大模型进行翻译与深度总结"""
     if not api_key:
         return "❌ 错误：未能获取到 API Key，请检查云端 Secrets 配置。"
 
@@ -80,15 +75,16 @@ def generate_ai_summary(news_text):
         timeout=60.0
     )
     
-    # 提示词：融合了翻译、政治军事重点、保留链接等所有要求
+    # 极其严厉的 Prompt，逼迫 AI 输出完整链接
     prompt = f"""你是一个资深的国际政治与军事战略分析师，擅长情报整合与地缘博弈分析。
 请根据以下抓取的多方信源新闻素材，为我写一份“今日全球地缘与军情简报”。
 要求：
 1. 挑出最重要、最具战略价值的 5 件事。
-2. 无论素材是何种语言（包括英文等），请务必先将其准确翻译为地道、专业的中文，然后再进行总结。
+2. 无论素材是何种语言，请务必先将其准确翻译为地道、专业的中文，然后再进行总结。
 3. 重点关注：大国博弈（中美俄欧）、地区冲突（如俄乌、中东、亚太）、以及敏感的军事部署与外交制裁。
 4. 语气专业、客观、精炼（请综合对比不同立场媒体的报道，不要偏向单一视角）。
-5. 用 Markdown 列表输出，每条提炼一个醒目标题，并且必须保留原始素材中的链接格式，以便我点击查看原文。
+5. 用 Markdown 列表输出，每条提炼一个醒目标题。
+6. **【强制要求】在每一条总结的最后，必须使用 `[点击阅读原文](完整的URL链接)` 的 Markdown 格式附上原文链接。绝对不要省略网址，也不要只写媒体名称，必须给出完整的、可点击的链接！如果合并了多个素材，请附上最重要的那一个链接。**
 
 新闻素材：
 {news_text}
@@ -115,12 +111,17 @@ if st.button("🚀 一键抓取并生成今日简报", type="primary", use_conta
             
             st.success("✅ 今日情报生成完毕！")
             st.divider()
-            # 渲染最终简报（AI 返回的 Markdown 带有超链接）
+            # 渲染最终简报
             st.markdown(summary) 
             st.divider()
             
-            # 底部折叠框：展示原汁原味的原始新闻（供你查阅，不消耗大模型翻译）
-            with st.expander("🔍 展开查看：抓取到的原始外文/中文新闻素材（可点击原文）"):
-                st.markdown(raw_news)
+            # 底部折叠框：展示原汁原味的原始新闻，全部带可点击链接
+            with st.expander("🔍 展开查看：抓取到的原始外文/中文新闻素材（可点击标题看原文）"):
+                # 将素材解析成 Markdown 列表，让每个标题变成真正的超链接
+                for line in raw_news.strip().split('\n'):
+                    match = re.search(r'【(.*?)】 【(.*?)】 \(原文链接: (.*?)\) - (.*)', line)
+                    if match:
+                        media, title, link, summary = match.groups()
+                        st.markdown(f"**[{media}]** [{title}]({link}) \n\n> {summary}\n")
     else:
         st.error("❌ 所有新闻源均抓取失败，请检查网络。")
