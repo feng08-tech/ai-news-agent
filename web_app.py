@@ -53,23 +53,17 @@ def text_to_speech(text):
         communicate = edge_tts.Communicate(text, voice)
         await communicate.save(output_file)
     
-    # 尝试获取当前事件循环，如果不存在则创建新的
+    # 🌟 核心修复：为当前调用创建一个独立、全新的异步事件循环
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    # 如果循环已在运行，则使用 run_until_complete
-    if loop.is_running():
         loop.run_until_complete(_generate())
-    else:
-        asyncio.run(_generate())
+    finally:
+        loop.close()
         
     with open(output_file, "rb") as f:
         audio_data = f.read()
-    return audio_datadef summarize_with_ai(news_list, query):
-    news_text = "\n".join([f"- {item['title']}" for item in news_list])
+    return audio_data    news_text = "\n".join([f"- {item['title']}" for item in news_list])
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0)
     prompt = f"你现在的身份是【{persona}】。请围绕【{query}】，根据以下信息写一段 150 字左右的简报。\n参考：\n{news_text}"
     try:
