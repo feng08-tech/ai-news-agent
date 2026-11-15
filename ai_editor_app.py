@@ -6,39 +6,34 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# 加载本地环境变量
+# 加载本地环境变量（用于本地开发）
 load_dotenv()
 
-# ================= 核心修复：全局读取云端/本地密钥 =================
+# ================= 核心：自动读取云端/本地密钥 =================
 try:
+    # 优先从 Streamlit Cloud 的 Secrets 读取
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     base_url = st.secrets.get("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
 except Exception:
+    # 本地运行时的回退方案
     api_key = os.getenv("ANTHROPIC_API_KEY")
     base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
-# ==================================================================
+# ================================================================
 
-st.set_page_config(page_title="AI 智能新闻主编", page_icon="📰", layout="centered")
-st.title("📰 AI 智能新闻主编")
-st.write("一键抓取全球媒体最新资讯，由 DeepSeek 为你提炼核心政治与军事事件（附原文链接）！")
+st.set_page_config(page_title="AI 全球情报主编", page_icon="🌍", layout="centered")
+st.title("🌍 AI 全球情报主编")
+st.write("一键抓取中外多方信源，由 DeepSeek 自动翻译并提炼最核心的政治与军事地缘博弈事件。")
 
-# 扩充的国际政治与军事信源（国内+国外+中立）
+# 精选信源：涵盖中美俄欧、中东及国际组织
 feeds = {
-    # 1. 西方视角与深度军情
     "Defense News (美防务)": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
     "The War Zone (美战区)": "https://www.thedrive.com/the-war-zone/rss",
     "Reuters (路透社)": "https://www.reuters.com/arc/outboundfeeds/v3/all/?outputType=xml",
     "BBC World (英广播)": "https://feeds.bbci.co.uk/news/world/rss.xml",
-
-    # 2. 中东与非西方视角
     "Al Jazeera (半岛中东)": "https://www.aljazeera.com/xml/rss/all.xml",
     "Sputnik (俄卫星社)": "https://sputniknews.cn/export/rss2/archive/index.xml",
-
-    # 3. 中国官方视角（内网直连，极度稳定）
     "中国军网 (解放军报)": "http://www.81.cn/rss/jfjb.xml",
     "新华网国际": "http://www.xinhuanet.com/world/news_world.xml",
-
-    # 4. 绝对中立国际视角
     "UN News (联合国)": "https://news.un.org/feed/subscribe/zh/news/all/rss.xml"
 }
 
@@ -47,42 +42,53 @@ headers = {
 }
 
 def clean_html(raw_html):
+    """清理网页的 HTML 标签"""
     cleanr = re.compile('<.*?>')
     cleantext = re.sub(cleanr, '', raw_html)
     return cleantext.strip()
 
 def fetch_all_news():
+    """抓取并拼接新闻素材"""
     all_news_text = ""
     for name, url in feeds.items():
         try:
             response = requests.get(url, headers=headers, timeout=10)
             feed = feedparser.parse(response.text)
             if feed.entries:
-                for entry in feed.entries[:10]: 
+                # 每个源抓取前 8 条，既能看全，又不至于让网络卡死
+                for entry in feed.entries[:8]: 
                     title = entry.title
                     link = entry.link
                     summary = clean_html(entry.get('summary', '暂无摘要'))
                     if len(summary) > 100:
                         summary = summary[:100] + "..."
+                    # 拼接成带原文链接的格式
                     all_news_text += f"【{name}】 [{title}]({link}) - {summary}\n"
         except Exception:
+            # 个别源超时或失败直接跳过，不影响整体
             pass 
     return all_news_text
 
 def generate_ai_summary(news_text):
+    """调用大模型进行翻译与深度总结"""
+    if not api_key:
+        return "❌ 错误：未能获取到 API Key，请检查云端 Secrets 配置。"
+
     client = OpenAI(
         api_key=api_key,
         base_url=base_url,
         timeout=60.0
     )
     
+    # 提示词：融合了翻译、政治军事重点、保留链接等所有要求
     prompt = f"""你是一个资深的国际政治与军事战略分析师，擅长情报整合与地缘博弈分析。
 请根据以下抓取的多方信源新闻素材，为我写一份“今日全球地缘与军情简报”。
 要求：
 1. 挑出最重要、最具战略价值的 5 件事。
-2. **重点关注：大国博弈（中美俄欧）、地区冲突（如俄乌、中东、亚太）、以及敏感的军事部署与外交制裁。**
-3. 语气专业、客观、精炼（请综合对比不同立场媒体的报道，不要偏向单一视角）。
-4. 用 Markdown 列表输出，每条提炼一个醒目标题，并且必须保留原始素材中的链接格式，以便我点击查看原文。
+2. 无论素材是何种语言（包括英文等），请务必先将其准确翻译为地道、专业的中文，然后再进行总结。
+3. 重点关注：大国博弈（中美俄欧）、地区冲突（如俄乌、中东、亚太）、以及敏感的军事部署与外交制裁。
+4. 语气专业、客观、精炼（请综合对比不同立场媒体的报道，不要偏向单一视角）。
+5. 用 Markdown 列表输出，每条提炼一个醒目标题，并且必须保留原始素材中的链接格式，以便我点击查看原文。
 
 新闻素材：
 {news_text}
@@ -97,21 +103,24 @@ def generate_ai_summary(news_text):
     except Exception as e:
         return f"❌ AI 总结失败：{e}"
 
+# ================= 网页界面 =================
 if st.button("🚀 一键抓取并生成今日简报", type="primary", use_container_width=True):
     
-    with st.spinner("📡 正在全网抓取海量资讯..."):
+    with st.spinner("📡 正在全网抓取中外最新资讯..."):
         raw_news = fetch_all_news()
         
     if raw_news:
-        with st.spinner("🧠 AI 主编正在疯狂阅读并提炼核心..."):
+        with st.spinner("🧠 AI 主编正在翻译、阅读并提炼核心..."):
             summary = generate_ai_summary(raw_news)
             
-            st.success("✅ 今日简报生成完毕！")
+            st.success("✅ 今日情报生成完毕！")
             st.divider()
+            # 渲染最终简报（AI 返回的 Markdown 带有超链接）
             st.markdown(summary) 
             st.divider()
             
-            with st.expander("🔍 展开查看：所有抓取到的原始新闻（最多可达70条，可点击原文）"):
+            # 底部折叠框：展示原汁原味的原始新闻（供你查阅，不消耗大模型翻译）
+            with st.expander("🔍 展开查看：抓取到的原始外文/中文新闻素材（可点击原文）"):
                 st.markdown(raw_news)
     else:
         st.error("❌ 所有新闻源均抓取失败，请检查网络。")
