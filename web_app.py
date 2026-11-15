@@ -13,16 +13,15 @@ from datetime import datetime
 import feedparser
 import edge_tts
 import asyncio
-import nest_asyncio
+import threading
 
-# 加载环境变量并应用异步补丁
+# 加载环境变量
 load_dotenv()
-nest_asyncio.apply()
 
 # ================= 配置区域 =================
-# ⚠️ 请确保把下面引号里的内容换成你自己的真实钉钉数据（保留英文双引号）
-DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=69b36940ef9ba884b92503cd7d948f8d702976e6824a393cfba46d56daaae596"
-DINGTALK_SECRET = "SEC49f300fbb22571d34706711d9f777f53347e58141f008667a989e2f8b3c4f7a1"
+# ⚠️ 请确保把你自己的真实钉钉数据填在这里（注意保留英文双引号）
+DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=69b36940ef9ba884b92503cd7d948f8d702976e6824a393cfba46d56daaae596
+DINGTALK_SECRET = "SEC49f300fbb22571d34706711d9f777f53347e58141f008667a989e2f8b3c4f7a1
 # ============================================
 
 # 尝试从 Streamlit Cloud 的 Secrets 中读取密钥
@@ -45,25 +44,49 @@ def load_history():
             return json.load(f)
     return []
 
-def text_to_speech(text):
-    voice = "zh-CN-XiaoxiaoNeural" 
-    output_file = "output.mp3"
-    
-    async def _generate():
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(output_file)
-    
-    # 🌟 核心修复：为当前调用创建一个独立、全新的异步事件循环
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+def save_history(topic, summary):
+    history = load_history()
+    record = {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "topic": topic, "summary": summary}
+    history.insert(0, record) 
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=4)
+
+with st.sidebar:
+    st.header("📚 历史简报库")
+    history_data = load_history()
+    if not history_data:
+        st.info("暂无历史记录，快去生成第一条吧！")
+    else:
+        for item in history_data:
+            with st.expander(f"🕒 {item['time']} | {item['topic']}"):
+                st.write(item['summary'])
+        if st.button("🗑️ 清空历史记录"):
+            if os.path.exists(HISTORY_FILE):
+                os.remove(HISTORY_FILE)
+                st.rerun()
+
+# ================= 核心功能 =================
+user_topic = st.text_input("你想让 AI 关注什么主题？", value="今日最新的 AI 行业新闻")
+persona = st.selectbox("选择 AI 的人设：", ["资深科技主编", "幽默段子手", "小红书爆款文案", "暴躁老哥"])
+
+def fetch_news(query):
+    rss_url = "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml"
     try:
-        loop.run_until_complete(_generate())
-    finally:
-        loop.close()
-        
-    with open(output_file, "rb") as f:
-        audio_data = f.read()
-    return audio_data    news_text = "\n".join([f"- {item['title']}" for item in news_list])
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(rss_url, headers=headers, timeout=10)
+        feed = feedparser.parse(response.text)
+        news_list = []
+        for entry in feed.entries[:5]:
+            news_list.append({"title": entry.title})
+        if news_list:
+            return news_list
+        else:
+            return [{"title": f"未抓取到新闻，请基于知识库生成关于 {query} 的总结。"}]
+    except Exception as e:
+        return [{"title": f"网络异常 {e}，请基于知识库生成关于 {query} 的总结。"}]
+
+def summarize_with_ai(news_list, query):
+    news_text = "\n".join([f"- {item['title']}" for item in news_list])
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0)
     prompt = f"你现在的身份是【{persona}】。请围绕【{query}】，根据以下信息写一段 150 字左右的简报。\n参考：\n{news_text}"
     try:
@@ -88,17 +111,16 @@ def text_to_speech(text):
     voice = "zh-CN-XiaoxiaoNeural" 
     output_file = "output.mp3"
     
-    async def _generate():
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(output_file)
-    
-    # 🌟 核心修复：手动创建事件循环，避免 Streamlit 环境下的 NoEventLoopError
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(_generate())
-    finally:
-        loop.close()
+    # 🌟 终极防冲突方案：将异步任务放入独立的子线程中运行，彻底隔离 Streamlit 的事件循环
+    def run_tts():
+        async def _generate():
+            communicate = edge_tts.Communicate(text, voice)
+            await communicate.save(output_file)
+        asyncio.run(_generate())
+        
+    t = threading.Thread(target=run_tts)
+    t.start()
+    t.join()
         
     with open(output_file, "rb") as f:
         audio_data = f.read()
