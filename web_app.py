@@ -14,7 +14,8 @@ from dotenv import load_dotenv
 from datetime import datetime
 import feedparser
 import edge_tts
-import nest_asyncioimport io
+import nest_asyncio
+import io
 
 load_dotenv()
 
