@@ -15,11 +15,12 @@ import edge_tts
 import asyncio
 import nest_asyncio
 
+# 加载环境变量并应用异步补丁
 load_dotenv()
 nest_asyncio.apply()
 
 # ================= 配置区域 =================
-# ⚠️ 请把下面引号里的内容换成你自己的真实钉钉数据！
+# ⚠️ 请确保把下面引号里的内容换成你自己的真实钉钉数据（保留英文双引号）
 DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=69b36940ef9ba884b92503cd7d948f8d702976e6824a393cfba46d56daaae596"
 DINGTALK_SECRET = "SEC49f300fbb22571d34706711d9f777f53347e58141f008667a989e2f8b3c4f7a1"
 # ============================================
@@ -110,10 +111,19 @@ def generate_image(prompt):
 def text_to_speech(text):
     voice = "zh-CN-XiaoxiaoNeural" 
     output_file = "output.mp3"
+    
     async def _generate():
         communicate = edge_tts.Communicate(text, voice)
         await communicate.save(output_file)
-    asyncio.run(_generate())
+    
+    # 🌟 核心修复：手动创建事件循环，避免 Streamlit 环境下的 NoEventLoopError
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(_generate())
+    finally:
+        loop.close()
+        
     with open(output_file, "rb") as f:
         audio_data = f.read()
     return audio_data
