@@ -10,28 +10,27 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ================= 核心修复：全局读取云端/本地密钥 =================
-# 尝试从 Streamlit Cloud 的 Secrets 中读取
 try:
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     base_url = st.secrets.get("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
 except Exception:
-    # 如果云端没读到，回退到本地 .env
     api_key = os.getenv("ANTHROPIC_API_KEY")
     base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
 # ==================================================================
 
 st.set_page_config(page_title="AI 智能新闻主编", page_icon="📰", layout="centered")
 st.title("📰 AI 智能新闻主编")
-st.write("一键抓取三大科技媒体最新资讯，由 DeepSeek 为你提炼今日最核心的 3 条大事件！")
+st.write("一键抓取三大媒体最新资讯，由 DeepSeek 为你提炼核心事件（附原文链接）！")
 
+# 换成了你想要的国际政治与军事信源
 feeds = {
-    "Defense News (防务新闻)": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
-    "Reuters (路透地缘政治)": "https://www.reuters.com/arc/outboundfeeds/v3/all/?outputType=xml",
-    "Al Jazeera (半岛电视台)": "https://www.aljazeera.com/xml/rss/all.xml",
-    "BBC World (BBC国际)": "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "The War Zone (战区)": "https://www.thedrive.com/the-war-zone/rss",
-    "ISW (战争研究所)": "https://www.understandingwar.org/feeds/all.xml"
+    "Defense News": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
+    "Reuters": "https://www.reuters.com/arc/outboundfeeds/v3/all/?outputType=xml",
+    "Al Jazeera": "https://www.aljazeera.com/xml/rss/all.xml",
+    "BBC World": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "The War Zone": "https://www.thedrive.com/the-war-zone/rss"
 }
+
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
@@ -50,27 +49,29 @@ def fetch_all_news():
             if feed.entries:
                 for entry in feed.entries[:3]: 
                     title = entry.title
+                    link = entry.link  # 🌟 提取原文链接
                     summary = clean_html(entry.get('summary', '暂无摘要'))
                     if len(summary) > 100:
                         summary = summary[:100] + "..."
-                    all_news_text += f"【{name}】 {title} - {summary}\n"
+                    # 🌟 拼接成带链接的格式
+                    all_news_text += f"【{name}】 [{title}]({link}) - {summary}\n"
         except Exception:
             pass 
     return all_news_text
 
 def generate_ai_summary(news_text):
     client = OpenAI(
-        api_key=api_key,  # 这里直接使用全局变量
+        api_key=api_key,
         base_url=base_url,
         timeout=60.0
     )
     
-    prompt = f"""你是一个资深的科技与财经主编。
-请根据以下抓取的最新新闻素材，为我写一份“今日核心简报”。
+    prompt = f"""你是一个资深国际政治与军事主编。
+请根据以下抓取的新闻素材，为我写一份“今日全球局势简报”。
 要求：
-1. 挑出最重要、最有价值的 3 件事。
-2. 语气专业、精炼，不要废话。
-3. 用 Markdown 格式输出，每条提炼一个醒目的标题。
+1. 挑出最重要、最具有战略价值的 3 件事。
+2. 语气专业、客观。
+3. 用 Markdown 列表输出，每条提炼一个醒目标题，并且**必须保留原始素材中的链接格式**，以便我点击查看原文。
 
 新闻素材：
 {news_text}
@@ -96,10 +97,11 @@ if st.button("🚀 一键抓取并生成今日简报", type="primary", use_conta
             
             st.success("✅ 今日简报生成完毕！")
             st.divider()
-            st.markdown(summary)
+            st.markdown(summary) # 因为保留了 Markdown 语法，这里渲染出来链接就是可点击的蓝色字体
             st.divider()
             
-            with st.expander("🔍 查看抓取到的原始新闻素材"):
-                st.text(raw_news)
+            # 原始素材也变成可点击的 Markdown 格式
+            with st.expander("🔍 查看抓取到的原始新闻素材（可点击原文）"):
+                st.markdown(raw_news)
     else:
         st.error("❌ 所有新闻源均抓取失败，请检查网络。")
