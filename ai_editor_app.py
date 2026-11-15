@@ -6,15 +6,24 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# 加载环境变量
+# 加载本地环境变量（用于本地运行）
 load_dotenv()
 
-# 页面配置
+# ================= 核心修复：云端密钥读取逻辑 =================
+# 优先从 Streamlit Cloud 的 Secrets 中读取，并注入到环境变量
+try:
+    if "ANTHROPIC_API_KEY" in st.secrets:
+        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
+    if "ANTHROPIC_BASE_URL" in st.secrets:
+        os.environ["ANTHROPIC_BASE_URL"] = st.secrets["ANTHROPIC_BASE_URL"]
+except Exception:
+    pass
+# ============================================================
+
 st.set_page_config(page_title="AI 智能新闻主编", page_icon="📰", layout="centered")
 st.title("📰 AI 智能新闻主编")
 st.write("一键抓取三大科技媒体最新资讯，由 DeepSeek 为你提炼今日最核心的 3 条大事件！")
 
-# 精选优质信源（去掉了经常超时的 V2EX 和澎湃）
 feeds = {
     "IT之家 (科技)": "https://www.ithome.com/rss/",
     "Solidot (奇客)": "https://www.solidot.org/index.rss",
@@ -26,13 +35,11 @@ headers = {
 }
 
 def clean_html(raw_html):
-    """过滤网页标签"""
     cleanr = re.compile('<.*?>')
     cleantext = re.sub(cleanr, '', raw_html)
     return cleantext.strip()
 
 def fetch_all_news():
-    """抓取所有新闻"""
     all_news_text = ""
     for name, url in feeds.items():
         try:
@@ -46,11 +53,10 @@ def fetch_all_news():
                         summary = summary[:100] + "..."
                     all_news_text += f"【{name}】 {title} - {summary}\n"
         except Exception:
-            pass # 忽略单个源的错误，不影响整体
+            pass 
     return all_news_text
 
 def generate_ai_summary(news_text):
-    """调用大模型进行总结"""
     client = OpenAI(
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         base_url="https://api.deepseek.com",
@@ -77,7 +83,6 @@ def generate_ai_summary(news_text):
     except Exception as e:
         return f"❌ AI 总结失败：{e}"
 
-# ================= 网页交互逻辑 =================
 if st.button("🚀 一键抓取并生成今日简报", type="primary", use_container_width=True):
     
     with st.spinner("📡 正在全网抓取最新资讯..."):
@@ -89,11 +94,9 @@ if st.button("🚀 一键抓取并生成今日简报", type="primary", use_conta
             
             st.success("✅ 今日简报生成完毕！")
             st.divider()
-            # 展示 AI 生成的简报
             st.markdown(summary)
             st.divider()
             
-            # 一个小彩蛋：点击可以看原始的粗糙素材
             with st.expander("🔍 查看抓取到的原始新闻素材"):
                 st.text(raw_news)
     else:
