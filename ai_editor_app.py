@@ -66,17 +66,16 @@ def generate_ai_summary(news_text):
         timeout=60.0
     )
     
-    prompt = f"""你是一个资深国际政治与军事主编。
-请根据以下抓取的新闻素材，为我写一份“今日全球局势简报”。
+    prompt = f"""你是一个资深的国际政治与军事战略分析师。
+请根据以下抓取的最新新闻素材，为我写一份“今日全球局势简报”。
 要求：
-1. 挑出最重要、最具有战略价值的 3 件事。
-2. 语气专业、客观。
+1. 挑出最重要、最具战略价值的 3 件事，**必须兼顾国际政治动向（如外交博弈、大选、制裁）与军事冲突（如地区战争、军备部署）**。
+2. 语气专业、客观、精炼。
 3. 用 Markdown 列表输出，每条提炼一个醒目标题，并且**必须保留原始素材中的链接格式**，以便我点击查看原文。
 
 新闻素材：
 {news_text}
-"""
-    try:
+"""    try:
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[{"role": "user", "content": prompt}],
