@@ -20,7 +20,7 @@ nest_asyncio.apply()
 
 # ================= 配置区域 =================
 # ⚠️ 请把下面引号里的内容换成你自己的真实钉钉数据！
-DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=69b36940ef9ba884b92503cd7d948f8d702976e6824a393cfba46d56daaae596
+DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=69b36940ef9ba884b92503cd7d948f8d702976e6824a393cfba46d56daaae596"
 DINGTALK_SECRET = "SEC49f300fbb22571d34706711d9f777f53347e58141f008667a989e2f8b3c4f7a1
 # ============================================
 
