@@ -56,13 +56,21 @@ def fetch_all_news():
             pass 
     return all_news_text
 
-def generate_ai_summary(news_text):
+# 优先从 Streamlit Secrets 读取密钥，兼容本地 .env
+    api_key = None
+    try:
+        api_key = st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        pass
+    
+    if not api_key:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+
     client = OpenAI(
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        api_key=api_key,
         base_url="https://api.deepseek.com",
         timeout=60.0
-    )
-    
+    )    
     prompt = f"""你是一个资深的科技与财经主编。
 请根据以下抓取的最新新闻素材，为我写一份“今日核心简报”。
 要求：
