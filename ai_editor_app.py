@@ -6,19 +6,19 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# 加载本地环境变量（用于本地运行）
+# 加载本地环境变量
 load_dotenv()
 
-# ================= 核心修复：云端密钥读取逻辑 =================
-# 优先从 Streamlit Cloud 的 Secrets 中读取，并注入到环境变量
+# ================= 核心修复：全局读取云端/本地密钥 =================
+# 尝试从 Streamlit Cloud 的 Secrets 中读取
 try:
-    if "ANTHROPIC_API_KEY" in st.secrets:
-        os.environ["ANTHROPIC_API_KEY"] = st.secrets["ANTHROPIC_API_KEY"]
-    if "ANTHROPIC_BASE_URL" in st.secrets:
-        os.environ["ANTHROPIC_BASE_URL"] = st.secrets["ANTHROPIC_BASE_URL"]
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
+    base_url = st.secrets.get("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
 except Exception:
-    pass
-# ============================================================
+    # 如果云端没读到，回退到本地 .env
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
+# ==================================================================
 
 st.set_page_config(page_title="AI 智能新闻主编", page_icon="📰", layout="centered")
 st.title("📰 AI 智能新闻主编")
@@ -56,21 +56,13 @@ def fetch_all_news():
             pass 
     return all_news_text
 
-# 优先从 Streamlit Secrets 读取密钥，兼容本地 .env
-    api_key = None
-    try:
-        api_key = st.secrets["ANTHROPIC_API_KEY"]
-    except Exception:
-        pass
-    
-    if not api_key:
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-
+def generate_ai_summary(news_text):
     client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com",
+        api_key=api_key,  # 这里直接使用全局变量
+        base_url=base_url,
         timeout=60.0
-    )    
+    )
+    
     prompt = f"""你是一个资深的科技与财经主编。
 请根据以下抓取的最新新闻素材，为我写一份“今日核心简报”。
 要求：
