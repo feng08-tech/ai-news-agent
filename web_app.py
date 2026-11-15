@@ -45,48 +45,30 @@ def load_history():
             return json.load(f)
     return []
 
-def save_history(topic, summary):
-    history = load_history()
-    record = {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "topic": topic, "summary": summary}
-    history.insert(0, record) 
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=4)
-
-with st.sidebar:
-    st.header("📚 历史简报库")
-    history_data = load_history()
-    if not history_data:
-        st.info("暂无历史记录，快去生成第一条吧！")
-    else:
-        for item in history_data:
-            with st.expander(f"🕒 {item['time']} | {item['topic']}"):
-                st.write(item['summary'])
-        if st.button("🗑️ 清空历史记录"):
-            if os.path.exists(HISTORY_FILE):
-                os.remove(HISTORY_FILE)
-                st.rerun()
-
-# ================= 核心功能 =================
-user_topic = st.text_input("你想让 AI 关注什么主题？", value="今日最新的 AI 行业新闻")
-persona = st.selectbox("选择 AI 的人设：", ["资深科技主编", "幽默段子手", "小红书爆款文案", "暴躁老哥"])
-
-def fetch_news(query):
-    rss_url = "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml"
+def text_to_speech(text):
+    voice = "zh-CN-XiaoxiaoNeural" 
+    output_file = "output.mp3"
+    
+    async def _generate():
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(output_file)
+    
+    # 尝试获取当前事件循环，如果不存在则创建新的
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(rss_url, headers=headers, timeout=10)
-        feed = feedparser.parse(response.text)
-        news_list = []
-        for entry in feed.entries[:5]:
-            news_list.append({"title": entry.title})
-        if news_list:
-            return news_list
-        else:
-            return [{"title": f"未抓取到新闻，请基于知识库生成关于 {query} 的总结。"}]
-    except Exception as e:
-        return [{"title": f"网络异常 {e}，请基于知识库生成关于 {query} 的总结。"}]
-
-def summarize_with_ai(news_list, query):
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    # 如果循环已在运行，则使用 run_until_complete
+    if loop.is_running():
+        loop.run_until_complete(_generate())
+    else:
+        asyncio.run(_generate())
+        
+    with open(output_file, "rb") as f:
+        audio_data = f.read()
+    return audio_datadef summarize_with_ai(news_list, query):
     news_text = "\n".join([f"- {item['title']}" for item in news_list])
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0)
     prompt = f"你现在的身份是【{persona}】。请围绕【{query}】，根据以下信息写一段 150 字左右的简报。\n参考：\n{news_text}"
