@@ -13,8 +13,8 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime
 import feedparser
-from gtts import gTTS
-import io
+import edge_tts
+import nest_asyncioimport io
 
 load_dotenv()
 
@@ -98,10 +98,19 @@ def generate_image(prompt):
     return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=400&nologo=true"
 
 def text_to_speech(text):
-    # 使用微软 Edge TTS，无需翻墙，音质极佳
-    voice = "zh-CN-XiaoxiaoNeural" # 晓晓女声，也可以用 zh-CN-YunxiNeural (云希男声)
+    voice = "zh-CN-XiaoxiaoNeural" 
     output_file = "output.mp3"
     
+    async def _generate():
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(output_file)
+        
+    asyncio.run(_generate())
+    
+    with open(output_file, "rb") as f:
+        audio_data = f.read()
+        
+    return audio_data    
     async def _generate():
         communicate = edge_tts.Communicate(text, voice)
         await communicate.save(output_file)
