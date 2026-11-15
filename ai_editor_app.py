@@ -22,15 +22,24 @@ st.set_page_config(page_title="AI 智能新闻主编", page_icon="📰", layout=
 st.title("📰 AI 智能新闻主编")
 st.write("一键抓取全球媒体最新资讯，由 DeepSeek 为你提炼核心政治与军事事件（附原文链接）！")
 
-# ================= 扩充的国际政治与军事信源 =================
+# 扩充的国际政治与军事信源（国内+国外+中立）
 feeds = {
-    "Defense News (防务新闻)": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
-    "Breaking Defense (防务快报)": "https://breakingdefense.com/feed/",
-    "Defense One (防务一号)": "https://www.defenseone.com/rss/all/",
-    "The War Zone (战区)": "https://www.thedrive.com/the-war-zone/rss",
+    # 1. 西方视角与深度军情
+    "Defense News (美防务)": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
+    "The War Zone (美战区)": "https://www.thedrive.com/the-war-zone/rss",
     "Reuters (路透社)": "https://www.reuters.com/arc/outboundfeeds/v3/all/?outputType=xml",
-    "Al Jazeera (半岛电视台)": "https://www.aljazeera.com/xml/rss/all.xml",
-    "BBC World (BBC国际)": "https://feeds.bbci.co.uk/news/world/rss.xml"
+    "BBC World (英广播)": "https://feeds.bbci.co.uk/news/world/rss.xml",
+
+    # 2. 中东与非西方视角
+    "Al Jazeera (半岛中东)": "https://www.aljazeera.com/xml/rss/all.xml",
+    "Sputnik (俄卫星社)": "https://sputniknews.cn/export/rss2/archive/index.xml",
+
+    # 3. 中国官方视角（内网直连，极度稳定）
+    "中国军网 (解放军报)": "http://www.81.cn/rss/jfjb.xml",
+    "新华网国际": "http://www.xinhuanet.com/world/news_world.xml",
+
+    # 4. 绝对中立国际视角
+    "UN News (联合国)": "https://news.un.org/feed/subscribe/zh/news/all/rss.xml"
 }
 
 headers = {
@@ -49,7 +58,6 @@ def fetch_all_news():
             response = requests.get(url, headers=headers, timeout=10)
             feed = feedparser.parse(response.text)
             if feed.entries:
-                # 🌟 核心改动：把 [:3] 改成 [:10]，每个源抓 10 条
                 for entry in feed.entries[:10]: 
                     title = entry.title
                     link = entry.link
@@ -68,13 +76,13 @@ def generate_ai_summary(news_text):
         timeout=60.0
     )
     
-    # 注意：抓取的新闻太多，为了避免 AI 脑容量爆炸（Token超限），这里限制它只挑最核心的 5 条
-    prompt = f"""你是一个资深的国际政治与军事战略分析师。
-请根据以下抓取的新闻素材，为我写一份“今日全球局势简报”。
+    prompt = f"""你是一个资深的国际政治与军事战略分析师，擅长情报整合与地缘博弈分析。
+请根据以下抓取的多方信源新闻素材，为我写一份“今日全球地缘与军情简报”。
 要求：
-1. 挑出最重要、最具战略价值的 5 件事，必须兼顾国际政治动向（如外交博弈、大选、制裁）与军事冲突（如地区战争、军备部署）。
-2. 语气专业、客观、精炼。
-3. 用 Markdown 列表输出，每条提炼一个醒目标题，并且必须保留原始素材中的链接格式，以便我点击查看原文。
+1. 挑出最重要、最具战略价值的 5 件事。
+2. **重点关注：大国博弈（中美俄欧）、地区冲突（如俄乌、中东、亚太）、以及敏感的军事部署与外交制裁。**
+3. 语气专业、客观、精炼（请综合对比不同立场媒体的报道，不要偏向单一视角）。
+4. 用 Markdown 列表输出，每条提炼一个醒目标题，并且必须保留原始素材中的链接格式，以便我点击查看原文。
 
 新闻素材：
 {news_text}
@@ -103,7 +111,6 @@ if st.button("🚀 一键抓取并生成今日简报", type="primary", use_conta
             st.markdown(summary) 
             st.divider()
             
-            # 🌟 这里就是让你看更多新闻的入口！
             with st.expander("🔍 展开查看：所有抓取到的原始新闻（最多可达70条，可点击原文）"):
                 st.markdown(raw_news)
     else:
