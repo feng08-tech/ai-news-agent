@@ -22,13 +22,15 @@ st.set_page_config(page_title="AI 智能新闻主编", page_icon="📰", layout=
 st.title("📰 AI 智能新闻主编")
 st.write("一键抓取全球媒体最新资讯，由 DeepSeek 为你提炼核心政治与军事事件（附原文链接）！")
 
-# 国际政治与军事信源
+# ================= 扩充的国际政治与军事信源 =================
 feeds = {
-    "Defense News (防务)": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
+    "Defense News (防务新闻)": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
+    "Breaking Defense (防务快报)": "https://breakingdefense.com/feed/",
+    "Defense One (防务一号)": "https://www.defenseone.com/rss/all/",
+    "The War Zone (战区)": "https://www.thedrive.com/the-war-zone/rss",
     "Reuters (路透社)": "https://www.reuters.com/arc/outboundfeeds/v3/all/?outputType=xml",
-    "Al Jazeera (半岛)": "https://www.aljazeera.com/xml/rss/all.xml",
-    "BBC World (国际)": "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "The War Zone (战区)": "https://www.thedrive.com/the-war-zone/rss"
+    "Al Jazeera (半岛电视台)": "https://www.aljazeera.com/xml/rss/all.xml",
+    "BBC World (BBC国际)": "https://feeds.bbci.co.uk/news/world/rss.xml"
 }
 
 headers = {
@@ -47,7 +49,8 @@ def fetch_all_news():
             response = requests.get(url, headers=headers, timeout=10)
             feed = feedparser.parse(response.text)
             if feed.entries:
-                for entry in feed.entries[:3]: 
+                # 🌟 核心改动：把 [:3] 改成 [:10]，每个源抓 10 条
+                for entry in feed.entries[:10]: 
                     title = entry.title
                     link = entry.link
                     summary = clean_html(entry.get('summary', '暂无摘要'))
@@ -65,11 +68,11 @@ def generate_ai_summary(news_text):
         timeout=60.0
     )
     
-    # 强化政治与军事的 Prompt
+    # 注意：抓取的新闻太多，为了避免 AI 脑容量爆炸（Token超限），这里限制它只挑最核心的 5 条
     prompt = f"""你是一个资深的国际政治与军事战略分析师。
-请根据以下抓取的最新新闻素材，为我写一份“今日全球局势简报”。
+请根据以下抓取的新闻素材，为我写一份“今日全球局势简报”。
 要求：
-1. 挑出最重要、最具战略价值的 3 件事，必须兼顾国际政治动向（如外交博弈、大选、制裁）与军事冲突（如地区战争、军备部署）。
+1. 挑出最重要、最具战略价值的 5 件事，必须兼顾国际政治动向（如外交博弈、大选、制裁）与军事冲突（如地区战争、军备部署）。
 2. 语气专业、客观、精炼。
 3. 用 Markdown 列表输出，每条提炼一个醒目标题，并且必须保留原始素材中的链接格式，以便我点击查看原文。
 
@@ -88,7 +91,7 @@ def generate_ai_summary(news_text):
 
 if st.button("🚀 一键抓取并生成今日简报", type="primary", use_container_width=True):
     
-    with st.spinner("📡 正在全网抓取最新资讯..."):
+    with st.spinner("📡 正在全网抓取海量资讯..."):
         raw_news = fetch_all_news()
         
     if raw_news:
@@ -100,7 +103,8 @@ if st.button("🚀 一键抓取并生成今日简报", type="primary", use_conta
             st.markdown(summary) 
             st.divider()
             
-            with st.expander("🔍 查看抓取到的原始新闻素材（可点击原文）"):
+            # 🌟 这里就是让你看更多新闻的入口！
+            with st.expander("🔍 展开查看：所有抓取到的原始新闻（最多可达70条，可点击原文）"):
                 st.markdown(raw_news)
     else:
         st.error("❌ 所有新闻源均抓取失败，请检查网络。")
