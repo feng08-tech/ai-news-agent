@@ -13,15 +13,14 @@ from datetime import datetime
 import feedparser
 import edge_tts
 import asyncio
-import threading
 
 # 加载环境变量
 load_dotenv()
 
 # ================= 配置区域 =================
 # ⚠️ 请确保把你自己的真实钉钉数据填在这里（注意保留英文双引号）
-DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=69b36940ef9ba884b92503cd7d948f8d702976e6824a393cfba46d56daaae596
-DINGTALK_SECRET = "SEC49f300fbb22571d34706711d9f777f53347e58141f008667a989e2f8b3c4f7a1
+DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=69b36940ef9ba884b92503cd7d948f8d702976e6824a393cfba46d56daaae596"
+DINGTALK_SECRET = "SEC49f300fbb22571d34706711d9f777f53347e58141f008667a989e2f8b3c4f7a1"
 # ============================================
 
 # 尝试从 Streamlit Cloud 的 Secrets 中读取密钥
@@ -107,20 +106,17 @@ def generate_image(prompt):
     encoded_prompt = urllib.parse.quote(prompt)
     return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=400&nologo=true"
 
+# 🌟 终极修复的语音函数
 def text_to_speech(text):
     voice = "zh-CN-XiaoxiaoNeural" 
     output_file = "output.mp3"
     
-    # 🌟 终极防冲突方案：将异步任务放入独立的子线程中运行，彻底隔离 Streamlit 的事件循环
-    def run_tts():
-        async def _generate():
-            communicate = edge_tts.Communicate(text, voice)
-            await communicate.save(output_file)
-        asyncio.run(_generate())
-        
-    t = threading.Thread(target=run_tts)
-    t.start()
-    t.join()
+    async def _generate():
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(output_file)
+    
+    # 使用 asyncio.run() 创建独立循环，在云端最稳定
+    asyncio.run(_generate())
         
     with open(output_file, "rb") as f:
         audio_data = f.read()
