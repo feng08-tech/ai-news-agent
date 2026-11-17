@@ -7,6 +7,7 @@ import hmac
 import hashlib
 import base64
 import urllib.parse
+import re  # 用于处理语音文本
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime
@@ -33,7 +34,7 @@ except Exception:
 
 st.set_page_config(page_title="AI 新闻秘书 6.0", page_icon="🧠", layout="wide", initial_sidebar_state="collapsed")
 st.title("🧠 我的 AI 新闻秘书 6.0")
-st.write("点击下方按钮，AI 会生成简报、自动配图、语音播报并推送到钉钉！")
+st.write("点击下方按钮，AI 会生成简报、附上原文链接、自动配图、语音播报并推送到钉钉！")
 
 # ================= 历史记录管理模块 =================
 HISTORY_FILE = "history.json"
@@ -58,7 +59,7 @@ with st.sidebar:
     else:
         for item in history_data:
             with st.expander(f"🕒 {item['time']} | {item['topic']}"):
-                st.write(item['summary'])
+                st.markdown(item['summary']) # 改成 markdown 渲染，支持链接
         if st.button("🗑️ 清空历史记录"):
             if os.path.exists(HISTORY_FILE):
                 os.remove(HISTORY_FILE)
@@ -76,18 +77,29 @@ def fetch_news(query):
         feed = feedparser.parse(response.text)
         news_list = []
         for entry in feed.entries[:5]:
-            news_list.append({"title": entry.title})
+            # 🌟 核心改动：同时抓取标题和原文链接
+            news_list.append({"title": entry.title, "link": entry.link})
         if news_list:
             return news_list
         else:
-            return [{"title": f"未抓取到新闻，请基于知识库生成关于 {query} 的总结。"}]
+            return [{"title": f"未抓取到新闻，请基于知识库生成关于 {query} 的总结。", "link": ""}]
     except Exception as e:
-        return [{"title": f"网络异常 {e}，请基于知识库生成关于 {query} 的总结。"}]
+        return [{"title": f"网络异常 {e}，请基于知识库生成关于 {query} 的总结。", "link": ""}]
 
 def summarize_with_ai(news_list, query):
-    news_text = "\n".join([f"- {item['title']}" for item in news_list])
+    # 把标题和链接一起喂给大模型
+    news_text = "\n".join([f"- {item['title']} (原文链接: {item['link']})" for item in news_list])
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0)
-    prompt = f"你现在的身份是【{persona}】。请围绕【{query}】，根据以下信息写一段 150 字左右的简报。\n参考：\n{news_text}"
+    
+    # 🌟 核心改动：强令 AI 保留 Markdown 链接格式
+    prompt = f"""你现在的身份是【{persona}】。
+请围绕【{query}】，根据以下信息写一段 150 字左右的简报。
+要求：
+1. 必须保留原文链接，格式必须严格使用 Markdown 的超链接格式：[点击查看原文](链接URL)。
+2. 语气符合你的人设。
+参考信息：
+{news_text}
+"""
     try:
         response = client.chat.completions.create(
             model="deepseek-chat", messages=[{"role": "user", "content": prompt}], temperature=0.7, stream=True
@@ -106,16 +118,17 @@ def generate_image(prompt):
     encoded_prompt = urllib.parse.quote(prompt)
     return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=400&nologo=true"
 
-# 🌟 终极修复的语音函数
 def text_to_speech(text):
     voice = "zh-CN-XiaoxiaoNeural" 
     output_file = "output.mp3"
     
+    # 🌟 核心改动：把 Markdown 链接 [文字](网址) 中的网址洗掉，只保留文字，防止语音读出一长串网址
+    clean_text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', text)
+    
     async def _generate():
-        communicate = edge_tts.Communicate(text, voice)
+        communicate = edge_tts.Communicate(clean_text, voice) # 读取清洗后的文本
         await communicate.save(output_file)
     
-    # 使用 asyncio.run() 创建独立循环，在云端最稳定
     asyncio.run(_generate())
         
     with open(output_file, "rb") as f:
