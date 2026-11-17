@@ -30,26 +30,14 @@ st.write("全球政军情报自动翻译提炼，【历史记录已接入云端�
 
 # ================= 信源矩阵（保持你的多极视角） =================
 feeds = {
-     # 顶级通讯社
     "Reuters (路透社)": "https://www.reuters.com/arc/outboundfeeds/v3/all/?outputType=xml",
-    "AP News (美联社)": "https://rsshub.app/apnews/topics/apf-topnews",
-    # 西方大报
     "NYT (纽约时报)": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
-    "BBC World (英广播)": "https://feeds.bbci.co.uk/news/world/rss.xml",
-    # 中东与多极视角
     "Al Jazeera (半岛中东)": "https://www.aljazeera.com/xml/rss/all.xml",
     "Tasnim News (伊朗塔斯尼姆)": "https://www.tasnimnews.com/en/rss/feed/0/8/0/all-news",
     "Sputnik (俄卫星社)": "https://sputniknews.cn/export/rss2/archive/index.xml",
-    # 亚太与日本防务
     "Japan MoD (日本防卫省)": "https://www.mod.go.jp/j/rss/update.xml",
-    "Asagumo News (朝云新闻)": "https://www.asagumo-news.com/feed/",
-    # 中国视角
     "中国军网": "http://www.81.cn/rss/jfjb.xml",
-    "新华网国际": "http://www.xinhuanet.com/world/news_world.xml"
-}
-
-headers = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "UN News (联合国)": "https://news.un.org/feed/subscribe/zh/news/all/rss.xml"
 }
 
 headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
@@ -79,7 +67,7 @@ def fetch_all_news():
 def generate_ai_summary(news_text):
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=90.0)
     prompt = f"""你是一个顶级的国际政治与军事战略分析师。
-请根据以下素材，写一份“今日全球局势内参”。挑出最重要 5 件事，翻译为中文，重点关注大国博弈，地缘政治，军事冲突，经济制裁。
+请根据以下素材，写一份“今日全球局势内参”。挑出最重要 5 件事，翻译为中文，重点关注大国博弈。
 每条总结最后，必须附上 `[点击阅读原文](完整URL)`。
 素材：
 {news_text}
