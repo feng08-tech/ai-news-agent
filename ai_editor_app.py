@@ -6,29 +6,41 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 from supabase import create_client, Client
+import datetime
 
 load_dotenv()
-
-# ================= 核心：读取密钥 =================
-try:
-    api_key = st.secrets["ANTHROPIC_API_KEY"]
-    base_url = st.secrets.get("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
-    supabase_url = st.secrets["SUPABASE_URL"]
-    supabase_key = st.secrets["SUPABASE_KEY"]
-except Exception:
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com")
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY")
-
-# 初始化云数据库
-supabase: Client = create_client(supabase_url, supabase_key)
 
 st.set_page_config(page_title="AI 全球情报主编", page_icon="🌍", layout="wide")
 st.title("🌍 AI 全球情报主编")
 st.write("全球政军情报自动翻译提炼，【历史记录已接入云端永久保存】。")
 
-# ================= 信源矩阵（保持你的多极视角） =================
+# ================= 核心：读取与校验密钥 =================
+try:
+    # 建议在 Secrets 里统一用 LLM_API_KEY
+    api_key = st.secrets.get("LLM_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY")
+    base_url = st.secrets.get("LLM_BASE_URL", "https://api.deepseek.com")
+    supabase_url = st.secrets.get("SUPABASE_URL")
+    supabase_key = st.secrets.get("SUPABASE_KEY")
+except Exception:
+    api_key = os.getenv("LLM_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+    base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+
+# 核心拦截：缺 Key 直接停机，避免满屏报错
+if not api_key or not supabase_url or not supabase_key:
+    st.error("⚠️ 配置缺失：请检查 Streamlit Secrets 中的 LLM_API_KEY, SUPABASE_URL, SUPABASE_KEY 是否配置正确。")
+    st.info("注意：SUPABASE_URL 必须以 https:// 开头！")
+    st.stop()
+
+# 初始化数据库
+try:
+    supabase: Client = create_client(supabase_url, supabase_key)
+except Exception as e:
+    st.error(f"❌ 数据库连接失败，请检查 URL 和 KEY 格式：{e}")
+    st.stop()
+
+# ================= 信源矩阵 =================
 feeds = {
     "Reuters (路透社)": "https://www.reuters.com/arc/outboundfeeds/v3/all/?outputType=xml",
     "NYT (纽约时报)": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
@@ -46,6 +58,7 @@ def clean_html(raw_html):
     cleanr = re.compile('<.*?>')
     return re.sub(cleanr, '', raw_html).strip()
 
+# 注意：如果是测试，建议把 ttl 去掉，或者改成 60，否则 10 分钟内点按钮抓到的都是缓存
 @st.cache_data(ttl=600)
 def fetch_all_news():
     all_news_text = ""
@@ -60,11 +73,13 @@ def fetch_all_news():
                     summary = clean_html(entry.get('summary', '暂无摘要'))
                     if len(summary) > 80: summary = summary[:80] + "..."
                     all_news_text += f"【{name}】 [{title}]({link}) - {summary}\n"
-        except Exception:
-            pass 
+        except Exception as e:
+            # 打印错误方便调试
+            print(f"抓取 {name} 失败: {e}")
     return all_news_text
 
 def generate_ai_summary(news_text):
+    # 确保传入完整的 url
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=90.0)
     prompt = f"""你是一个顶级的国际政治与军事战略分析师。
 请根据以下素材，写一份“今日全球局势内参”。挑出最重要 5 件事，翻译为中文，重点关注大国博弈。
@@ -80,11 +95,10 @@ def generate_ai_summary(news_text):
     except Exception as e:
         return f"❌ 总结失败：{e}"
 
-# ================= 侧边栏：云端历史记录 =================
+# ================= 侧边栏 =================
 with st.sidebar:
     st.header("☁️ 云端历史情报库")
     
-    # 从 Supabase 读取数据
     try:
         response = supabase.table("history").select("*").order("time", desc=True).execute()
         history_data = response.data
@@ -98,7 +112,6 @@ with st.sidebar:
         for item in history_data:
             with st.expander(f"🕒 {item.get('time', '未知时间')}"):
                 st.markdown(item.get('summary', ''))
-                # 增加删除功能
                 if st.button("🗑️ 删除此条", key=f"del_{item.get('id')}"):
                     supabase.table("history").delete().eq("id", item.get('id')).execute()
                     st.rerun()
@@ -113,27 +126,33 @@ if st.button("🚀 一键抓取并生成今日简报", type="primary", use_conta
         with st.spinner("🧠 AI 正在深度提炼..."):
             summary = generate_ai_summary(raw_news)
             
-            st.success("✅ 生成完毕！并已自动保存至云端数据库。")
-            st.markdown(summary)
-            
-            # 存入 Supabase 云端数据库
-            import datetime
-            now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-            try:
-                supabase.table("history").insert({
-                    "time": now_time,
-                    "topic": "全球局势",
-                    "summary": summary
-                }).execute()
-            except Exception as e:
-                st.error(f"写入云端失败：{e}")
+            if "❌" not in summary:
+                st.success("✅ 生成完毕！并已自动保存至云端数据库。")
+                st.markdown(summary)
+                
+                now_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                try:
+                    supabase.table("history").insert({
+                        "time": now_time,
+                        "topic": "全球局势",
+                        "summary": summary
+                    }).execute()
+                except Exception as e:
+                    st.error(f"写入云端失败：{e}")
+            else:
+                st.error(summary)
 
             st.divider()
             with st.expander("🔍 原始新闻素材（可点击看原文）"):
-                for line in raw_news.strip().split('\n'):
-                    match = re.search(r'【(.*?)】 \[(.*?)\] \((.*?)\) - (.*)', line)
+                # 这里建议按行解析
+                lines = raw_news.strip().split('\n')
+                for line in lines:
+                    # 正则匹配稍作调整，防止有些摘要包含特殊字符导致匹配失败
+                    match = re.search(r'【(.*?)】\s*\[(.*?)\]\((.*?)\)\s*-\s*(.*)', line)
                     if match:
                         media, title, link, summary_text = match.groups()
                         st.markdown(f"**[{media}]** [{title}]({link}) \n\n> {summary_text}\n")
+                    else:
+                        st.text(line) # 兜底显示
     else:
         st.error("❌ 所有新闻源均抓取失败，请检查网络。")
