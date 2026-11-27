@@ -10,3 +10,5 @@ supabase
 python-dateutil
 pandas
 pydeck
+folium
+streamline-folium
