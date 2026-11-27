@@ -1,8 +1,7 @@
 import streamlit as st
 import os
 import pandas as pd
-import folium
-from streamlit.components.v1 import html  # 关键：绕过复杂的通信组件，直接渲染 HTML
+import pydeck as pdk
 from supabase import create_client, Client
 
 st.set_page_config(page_title="全球政军情报主编", page_icon="🌍", layout="wide")
@@ -47,38 +46,44 @@ with st.sidebar:
                     supabase.table("history").delete().eq("id", item.get("id")).execute()
                     st.rerun()
 
-# ================= 3. 深色战术地图 (HTML 嵌入版) =================
+# ================= 3. 深色战术地图（极简不崩溃版） =================
 st.subheader("📍 全球主要热点态势追踪")
 
 hotspot_data = pd.DataFrame({
-    "name": ["基辅 (俄乌)", "加沙 (中东)", "德黑兰 (伊朗)", "台海 (印太)", "哈尔科夫 (前线)", "喀土穆 (苏丹)"],
+    "name": ["基辅", "加沙", "德黑兰", "台海", "哈尔科夫", "喀土穆"],
     "lat": [50.45, 31.55, 35.69, 25.03, 49.99, 15.55],
     "lon": [30.52, 35.10, 51.39, 121.56, 36.23, 32.53]
 })
 
-# 使用 folium 生成深色底图
-m = folium.Map(
-    location=[30, 50], 
-    zoom_start=3,
-    tiles='https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attr='CartoDB'
+# 只保留红点，绝对不崩溃
+layer = pdk.Layer(
+    "ScatterplotLayer",
+    hotspot_data,
+    get_position=["lon", "lat"],
+    get_color=[255, 50, 50, 220], # 纯红色
+    get_radius=80000, # 像素大小适中
+    pickable=True,
 )
 
-# 打上红点
-for idx, row in hotspot_data.iterrows():
-    folium.CircleMarker(
-        location=[row['lat'], row['lon']],
-        radius=8,
-        color='#ff4b4b',
-        fill=True,
-        fill_color='#ff4b4b',
-        fill_opacity=0.8,
-        tooltip=row['name'],
-        popup=row['name']
-    ).add_to(m)
+# 锁定视角：经度 60，纬度 25，Zoom 放大到 1.5（刚好覆盖欧亚非，绝不会三连屏）
+view_state = pdk.ViewState(
+    latitude=25,
+    longitude=60, 
+    zoom=1.5, 
+    pitch=0
+)
 
-# 核心黑科技：直接把地图转成纯 HTML 字符串塞进页面，Safari 绝对不卡！
-html(m._repr_html_(), height=450)
+st.pydeck_chart(
+    pdk.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+        tooltip={"text": "📍 {name}"} # 鼠标悬浮显示中文
+    )
+)
+
+# 底部图例
+st.caption("🔴 **当前热点**：基辅 (俄乌) | 加沙 (中东) | 德黑兰 (伊朗) | 台海 (印太) | 哈尔科夫 (前线) | 喀土穆 (苏丹)")
 
 st.divider()
 
@@ -90,7 +95,6 @@ if not history_data:
     st.warning("还没有数据。请确认 GitHub Actions 已经成功运行并写入了 Supabase。")
 else:
     latest = history_data[0]
-    
     st.subheader(f"📌 最新内参：{latest.get('topic', '全球军政内参')}")
     st.caption(f"更新时间：{latest.get('time', '未知时间')}")
     
