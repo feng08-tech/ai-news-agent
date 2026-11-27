@@ -1,7 +1,8 @@
 import streamlit as st
 import os
 import pandas as pd
-import pydeck as pdk
+import folium
+from streamlit_folium import st_folium
 from supabase import create_client, Client
 
 st.set_page_config(page_title="全球政军情报主编", page_icon="🌍", layout="wide")
@@ -46,7 +47,7 @@ with st.sidebar:
                     supabase.table("history").delete().eq("id", item.get("id")).execute()
                     st.rerun()
 
-# ================= 3. 深色战术地图 =================
+# ================= 3. 态势地图（Folium 稳定版） =================
 st.subheader("📍 全球主要热点态势追踪")
 
 hotspot_data = pd.DataFrame({
@@ -55,35 +56,29 @@ hotspot_data = pd.DataFrame({
     "lon": [30.52, 35.10, 51.39, 121.56, 36.23, 32.53]
 })
 
-# 只保留红点图层，绝对不崩
-layer = pdk.Layer(
-    "ScatterplotLayer",
-    hotspot_data,
-    get_position=["lon", "lat"],
-    get_color=[255, 75, 75, 200], # 红色
-    get_radius=100000, 
-    pickable=True,
+# 创建地图，使用 CartoDB 的深色战术底图
+m = folium.Map(
+    location=[30, 50], # 中心点定在欧亚大陆交界
+    zoom_start=3,
+    tiles='https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attr='CartoDB'
 )
 
-# 关键修复：zoom 设为 1.8，经度设为 40，刚好覆盖欧亚非，绝不重复！
-view_state = pdk.ViewState(
-    latitude=30,
-    longitude=40, 
-    zoom=1.8, 
-    pitch=0
-)
+# 遍历数据，在地图上打点
+for idx, row in hotspot_data.iterrows():
+    folium.CircleMarker(
+        location=[row['lat'], row['lon']],
+        radius=6,
+        color='#ff4b4b',       # 边框红色
+        fill=True,
+        fill_color='#ff4b4b',  # 内部填充红色
+        fill_opacity=0.8,
+        tooltip=row['name'],   # 鼠标悬浮显示中文
+        popup=row['name']      # 点击显示中文
+    ).add_to(m)
 
-st.pydeck_chart(
-    pdk.Deck(
-        layers=[layer],
-        initial_view_state=view_state,
-        map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
-        tooltip={"text": "📍 {name}"} # 鼠标悬停显示中文
-    )
-)
-
-# 底部中文图例（弥补地图上不显示文字的问题）
-st.caption("🔴 **当前热点**：基辅 (俄乌) | 加沙 (中东) | 德黑兰 (伊朗) | 台海 (印太) | 哈尔科夫 (前线) | 喀土穆 (苏丹)")
+# 渲染到 Streamlit
+st_folium(m, width="100%", height=400, returned_objects=[])
 
 st.divider()
 
