@@ -62,44 +62,43 @@ hotspot_data = pd.DataFrame({
     "lon": [30.52, 35.10, 51.39, 121.56, 36.23, 32.53]
 })
 
-# 1. 定义红点图层
+# 1. 定义红点图层 (稍微调大点)
 scatter_layer = pdk.Layer(
     "ScatterplotLayer",
     hotspot_data,
     get_position=["lon", "lat"],
     get_color="[255, 75, 75, 200]", # 红色
-    get_radius=40000, # 点的大小
+    get_radius=50000, 
     pickable=True,
     auto_highlight=True,
 )
 
-# 2. 定义中文文字图层（直接在地图上显示地名）
+# 2. 定义中文文字图层（修复了引号错误）
 text_layer = pdk.Layer(
     "TextLayer",
     hotspot_data,
     get_position=["lon", "lat"],
     get_text="name",
-    get_size=16,
+    get_size=14,
     get_color="[255, 255, 255]", # 白色文字
-    get_alignment_baseline="'bottom'", # 文字在点的上方
+    get_alignment_baseline="bottom", 
 )
 
-# 3. 设置初始视角（经度、纬度、缩放级别）
+# 3. 修复地图重复问题：中心点往左移，稍微放大
 view_state = pdk.ViewState(
     latitude=30, 
-    longitude=50, 
-    zoom=1.2, 
+    longitude=20,  # 从 50 改到 20，避免地图拼接
+    zoom=1.5,      # 放大一点，让地图占满屏幕
     pitch=0
 )
 
-# 4. 渲染地图（使用深色战术底图）
+# 4. 渲染地图
 st.pydeck_chart(
     pdk.Deck(
         layers=[scatter_layer, text_layer],
         initial_view_state=view_state,
-        # 使用无需 Token 的深色底图
         map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
-        tooltip={"text": "{name}"} # 鼠标悬浮时显示中文
+        tooltip={"text": "{name}"} 
     )
 )
 
@@ -117,7 +116,6 @@ else:
     st.subheader(f"📌 最新内参：{latest.get('topic', '全球军政内参')}")
     st.caption(f"更新时间：{latest.get('time', '未知时间')}")
     
-    # 安全展示：直接用 st.markdown
     summary_text = latest.get("summary", "")
     if summary_text:
         st.markdown(summary_text)
