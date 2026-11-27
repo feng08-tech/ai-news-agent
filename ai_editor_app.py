@@ -1,13 +1,14 @@
 import streamlit as st
 import os
 import pandas as pd
+import pydeck as pdk
 from supabase import create_client, Client
 
 st.set_page_config(page_title="全球政军情报主编", page_icon="🌍", layout="wide")
 st.title("🌍 全球政军情报指挥中心")
 st.write("后台每日自动抓取、AI 研判并写入云端；本页面只负责读取和展示最新内参。")
 
-# ================= 1. 安全获取配置 =================
+# ================= 1. 配置与连接 =================
 try:
     supabase_url = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
     supabase_key = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
@@ -19,14 +20,13 @@ if not supabase_url or not supabase_key:
     st.error("⚠️ 配置缺失：请在 Streamlit Cloud 的 Secrets 中填写。")
     st.stop()
 
-# ================= 2. 连接数据库 =================
 try:
     supabase: Client = create_client(supabase_url, supabase_key)
 except Exception as e:
     st.error(f"❌ 数据库连接失败: {e}")
     st.stop()
 
-# ================= 3. 侧边栏 =================
+# ================= 2. 侧边栏 =================
 with st.sidebar:
     st.header("☁️ 云端历史情报库")
     try:
@@ -46,23 +46,48 @@ with st.sidebar:
                     supabase.table("history").delete().eq("id", item.get("id")).execute()
                     st.rerun()
 
-# ================= 4. 主工作区：态势地图（最稳定版） =================
+# ================= 3. 深色战术地图 =================
 st.subheader("📍 全球主要热点态势追踪")
 
 hotspot_data = pd.DataFrame({
+    "name": ["基辅 (俄乌)", "加沙 (中东)", "德黑兰 (伊朗)", "台海 (印太)", "哈尔科夫 (前线)", "喀土穆 (苏丹)"],
     "lat": [50.45, 31.55, 35.69, 25.03, 49.99, 15.55],
     "lon": [30.52, 35.10, 51.39, 121.56, 36.23, 32.53]
 })
 
-# 渲染原生地图，绝对不会出现重复和崩溃
-st.map(hotspot_data, latitude="lat", longitude="lon", size=200000, color="#ff4b4b")
+# 只保留红点图层，绝对不崩
+layer = pdk.Layer(
+    "ScatterplotLayer",
+    hotspot_data,
+    get_position=["lon", "lat"],
+    get_color=[255, 75, 75, 200], # 红色
+    get_radius=100000, 
+    pickable=True,
+)
 
-# 用一行小字作为中文图例说明
-st.caption("🔴 热点分布：基辅 (俄乌) | 加沙 (中东) | 德黑兰 (伊朗) | 台海 (印太) | 哈尔科夫 (前线) | 喀土穆 (苏丹)")
+# 关键修复：zoom 设为 1.8，经度设为 40，刚好覆盖欧亚非，绝不重复！
+view_state = pdk.ViewState(
+    latitude=30,
+    longitude=40, 
+    zoom=1.8, 
+    pitch=0
+)
+
+st.pydeck_chart(
+    pdk.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+        tooltip={"text": "📍 {name}"} # 鼠标悬停显示中文
+    )
+)
+
+# 底部中文图例（弥补地图上不显示文字的问题）
+st.caption("🔴 **当前热点**：基辅 (俄乌) | 加沙 (中东) | 德黑兰 (伊朗) | 台海 (印太) | 哈尔科夫 (前线) | 喀土穆 (苏丹)")
 
 st.divider()
 
-# ================= 5. 主工作区：最新内参 =================
+# ================= 4. 最新内参 =================
 if st.button("🔄 刷新最新情报", type="primary", use_container_width=True):
     st.rerun()
 
