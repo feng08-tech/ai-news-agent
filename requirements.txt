@@ -8,3 +8,4 @@ edge-tts
 nest-asyncio
 supabase
 python-dateutil
+pandas
