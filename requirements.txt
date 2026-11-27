@@ -9,3 +9,4 @@ nest-asyncio
 supabase
 python-dateutil
 pandas
+pydeck
