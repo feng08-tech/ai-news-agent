@@ -1,8 +1,10 @@
 import streamlit as st
 import os
 import pandas as pd
+import pydeck as pdk
 from supabase import create_client, Client
 
+# ================= 页面基础设置 =================
 st.set_page_config(page_title="全球政军情报主编", page_icon="🌍", layout="wide")
 st.title("🌍 全球政军情报指挥中心")
 st.write("后台每日自动抓取、AI 研判并写入云端；本页面只负责读取和展示最新内参。")
@@ -50,18 +52,56 @@ with st.sidebar:
                     except Exception as e:
                         st.error(f"删除失败：{e}")
 
-# ================= 4. 主工作区：态势地图 (模块二) =================
+# ================= 4. 主工作区：态势地图 =================
 st.subheader("📍 全球主要热点态势追踪")
 
-# 这里手动维护几个当前的热点坐标，后期你可以改成让 AI 自动提取
-hotspots = pd.DataFrame({
-    "lat": [50.45, 31.55, 35.69, 25.03, 48.37, 15.55],
-    "lon": [30.52, 35.10, 51.39, 121.56, 35.04, 32.53],
-    "name": ["Kyiv (俄乌)", "Gaza (中东)", "Tehran (伊朗)", "Taiwan (台海)", "Zaporizhzhia (前线)", "Khartoum (苏丹)"]
+# 构建带有中文名称的数据
+hotspot_data = pd.DataFrame({
+    "name": ["基辅 (俄乌)", "加沙 (中东)", "德黑兰 (伊朗)", "台海 (印太)", "哈尔科夫 (前线)", "喀土穆 (苏丹)"],
+    "lat": [50.45, 31.55, 35.69, 25.03, 49.99, 15.55],
+    "lon": [30.52, 35.10, 51.39, 121.56, 36.23, 32.53]
 })
 
-# 渲染地图，size 控制点的大小，color 设置颜色
-st.map(hotspots, latitude="lat", longitude="lon", size=30000, color="#ff4b4b")
+# 1. 定义红点图层
+scatter_layer = pdk.Layer(
+    "ScatterplotLayer",
+    hotspot_data,
+    get_position=["lon", "lat"],
+    get_color="[255, 75, 75, 200]", # 红色
+    get_radius=40000, # 点的大小
+    pickable=True,
+    auto_highlight=True,
+)
+
+# 2. 定义中文文字图层（直接在地图上显示地名）
+text_layer = pdk.Layer(
+    "TextLayer",
+    hotspot_data,
+    get_position=["lon", "lat"],
+    get_text="name",
+    get_size=16,
+    get_color="[255, 255, 255]", # 白色文字
+    get_alignment_baseline="'bottom'", # 文字在点的上方
+)
+
+# 3. 设置初始视角（经度、纬度、缩放级别）
+view_state = pdk.ViewState(
+    latitude=30, 
+    longitude=50, 
+    zoom=1.2, 
+    pitch=0
+)
+
+# 4. 渲染地图（使用深色战术底图）
+st.pydeck_chart(
+    pdk.Deck(
+        layers=[scatter_layer, text_layer],
+        initial_view_state=view_state,
+        # 使用无需 Token 的深色底图
+        map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+        tooltip={"text": "{name}"} # 鼠标悬浮时显示中文
+    )
+)
 
 st.divider()
 
