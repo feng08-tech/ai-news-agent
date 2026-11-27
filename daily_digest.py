@@ -30,29 +30,53 @@ if missing:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ================= 2. 信源矩阵（大幅扩充） =================
+# ================= 2. 全球无死角信源矩阵（包含中国深度视角） =================
 feeds = {
-    "GoogleNews 全球军政": "https://news.google.com/rss/search?q=intitle:military+OR+intitle:war+OR+intitle:defense&hl=en-US&gl=US&ceid=US:en",
-    "GoogleNews 俄乌局势": "https://news.google.com/rss/search?q=Ukraine+war+OR+Russia+military&hl=en-US&gl=US&ceid=US:en",
+    # --- 中国核心视角与中文资讯 ---
+    "GoogleNews 中国军事": "https://news.google.com/rss/search?q=解放军+OR+中国军方+OR+中国国防部&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+    "GoogleNews 台海动态": "https://news.google.com/rss/search?q=台海+OR+台湾+演习+OR+军售&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+    "GoogleNews 中国外交": "https://news.google.com/rss/search?q=中国外交部+OR+中美关系+OR+中俄合作&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+    "SCMP (南华早报)": "http://www.scmp.com/rss/318213/feed",
+
+    # --- 亚洲与大洋洲 ---
+    "Nikkei Asia (日经亚洲)": "https://asia.nikkei.com/rss/feed/nar",
+    "Times of India (印度时报)": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
     "GoogleNews 印太安全": "https://news.google.com/rss/search?q=Taiwan+strait+OR+South+China+Sea+military&hl=en-US&gl=US&ceid=US:en",
-    "GoogleNews 中文军事": "https://news.google.com/rss/search?q=军事+OR+国防+OR+冲突&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+
+    # --- 欧洲与俄罗斯 ---
     "ISW (战争研究所)": "https://www.understandingwar.org/feeds/all.xml",
-    "RAND (兰德公司)": "https://www.rand.org/rss.xml?feed=international-affairs",
-    "Foreign Policy": "https://foreignpolicy.com/feed/",
+    "Politico Europe (欧洲政治)": "https://www.politico.eu/feed/",
+    "The Guardian World": "https://www.theguardian.com/world/rss",
+    "GoogleNews 俄乌局势": "https://news.google.com/rss/search?q=Ukraine+war+OR+Russia+military&hl=en-US&gl=US&ceid=US:en",
+
+    # --- 北美洲与全球军政/经济 ---
     "Defense News": "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml",
     "The War Zone": "https://www.thedrive.com/the-war-zone/rss",
-    "Breaking Defense": "https://breakingdefense.com/feed/",
-    "Al Jazeera": "https://www.aljazeera.com/xml/rss/all.xml",
-    "SCMP": "http://www.scmp.com/rss/318213/feed",
-    "UN News": "https://news.un.org/feed/subscribe/zh/news/all/rss.xml",
-    "BBC Politics": "https://feeds.bbci.co.uk/news/politics/rss.xml",
-    "The Guardian World": "https://www.theguardian.com/world/rss",
+    "FT (金融时报)": "https://www.ft.com/rss/home",
+    "Bloomberg (彭博-政治)": "https://feeds.bloomberg.com/politics/news.rss",
+    "GoogleNews 制裁与关税": "https://news.google.com/rss/search?q=sanctions+OR+tariffs+OR+geopolitics+economy&hl=en-US&gl=US&ceid=US:en",
+
+    # --- 中东 ---
+    "Al Jazeera (半岛)": "https://www.aljazeera.com/xml/rss/all.xml",
+    "Times of Israel (以色列)": "https://www.timesofisrael.com/feed/",
+
+    # --- 非洲 ---
+    "AllAfrica (全非新闻)": "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
+    "GoogleNews 非洲安全": "https://news.google.com/rss/search?q=Africa+military+OR+Africa+conflict+OR+Sahel+security&hl=en-US&gl=US&ceid=US:en",
+
+    # --- 南美洲 ---
+    "Mercopress (南美地缘)": "https://en.mercopress.com/rss/",
+    "GoogleNews 拉美动态": "https://news.google.com/rss/search?q=South+America+military+OR+Latin+America+security&hl=en-US&gl=US&ceid=US:en",
+
+    # --- 南北两极 ---
+    "GoogleNews 极地地缘": "https://news.google.com/rss/search?q=Arctic+military+OR+Antarctica+geopolitics&hl=en-US&gl=US&ceid=US:en",
 }
 
+# ================= 新增：Telegram 公开频道 =================
 tg_channels = [
-    "Osinttechnical",
-    "sentdefender",
-    "wartranslated",
+    "Osinttechnical",   # 装备与战况开源情报
+    "sentdefender",     # 全球防务与突发快讯
+    "wartranslated",    # 俄乌前线战报翻译
 ]
 
 headers = {
@@ -75,8 +99,7 @@ def fetch_single_feed(name: str, url: str) -> str:
 
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         
-        # 升级：每个源抓 10 条，时间放宽到 72 小时
-        for entry in feed.entries[:10]:
+        for entry in feed.entries[:8]:
             pub_time = None
             if hasattr(entry, "published"):
                 try:
@@ -92,7 +115,7 @@ def fetch_single_feed(name: str, url: str) -> str:
             title = entry.get("title", "无标题")
             link = entry.get("link", "")
             summary = clean_html(entry.get("summary", ""))
-            if len(summary) > 200: # 摘要保留更多字
+            if len(summary) > 200:
                 summary = summary[:200] + "..."
 
             result_text += f"【{name}】 [{title}]({link}) - {summary}\n"
@@ -102,7 +125,7 @@ def fetch_single_feed(name: str, url: str) -> str:
 
     return result_text
 
-def fetch_telegram(channel: str, limit: int = 10) -> str: # 升级：TG 抓 10 条
+def fetch_telegram(channel: str, limit: int = 8) -> str:
     result_text = ""
     url = f"https://t.me/s/{channel}"
     try:
@@ -125,7 +148,7 @@ def fetch_telegram(channel: str, limit: int = 10) -> str: # 升级：TG 抓 10 �
 
 def fetch_all_news() -> str:
     all_news_text = ""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
         future_to_source = {}
         for name, url in feeds.items():
             future_to_source[executor.submit(fetch_single_feed, name, url)] = name
@@ -141,20 +164,22 @@ def fetch_all_news() -> str:
                 pass
     return all_news_text
 
-# ================= 4. 终极深度推演 Prompt =================
+# ================= 4. 终极全球视野 Prompt =================
 def generate_ai_summary(news_text: str) -> str:
     client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=180.0)
-    prompt = f"""你是一位顶级地缘政治智库的首席分析师。请根据以下全球最新素材，撰写一份极其详尽、具有战略纵深的《全球军政深度内参》。
+    prompt = f"""你是一位顶级地缘政治智库的首席分析师。请根据以下全球最新素材，撰写一份极其详尽、具有战略纵深的《全球军政与经济深度内参》。
 
 【写作要求】：
 1. 绝对不要写流水账！必须深挖事件背后的动机，并预测下一步走向。
-2. 必须包含以下四大板块，篇幅要长，内容要硬核：
+2. 必须包含以下六大板块，篇幅要长，内容要硬核。如果某板块当天确实没有新闻素材，请注明“本日该区域态势平稳”，严禁遗漏板块：
    ## 🌍 一、宏观战略定调 (当前全球最大风险与底层逻辑)
-   ## 🔥 二、重点战区动态推演 (提取具体武器型号、控制区域、兵力部署。结合 Telegram 快讯的即时动态，推演未来一周战局走向)
-   ## 🤝 三、大国交锋与外交暗战 (分析中美俄欧最新制裁、法案背后的真实筹码，各方底牌是什么)
-   ## ⚙️ 四、军工前沿与战争形态 (AI、无人机、新型弹药在实战中的演进与启示)
-3. 强化【情报交叉验证】：当正规媒体与 Telegram 快讯有出入时，必须单列段落进行研判。
-4. 语言极其克制、专业，充满“地缘博弈”、“战略威慑”、“消耗战”等术语。
+   ## 🔥 二、核心战区动态推演 (俄乌、中东、印太。重点分析台海与南海动态，提取武器型号并结合 Telegram 快讯推演)
+   ## 💰 三、地缘经济与制裁博弈 (中美经贸、科技战、军费、制裁、能源、供应链武器化)
+   ## 🌐 四、边缘地带扫描 (重点扫描：拉美、非洲、南北极。分析区域冲突、资源争夺与大国渗透)
+   ## 🤝 五、大国交锋与外交暗战 (中美俄欧最新法案背后的真实筹码，中国外交的最新动向)
+   ## ⚙️ 六、军工前沿与战争形态 (AI、无人机、新型弹药在实战中的演进，以及中国军工的突破)
+3. 强化【情报交叉验证】：当正规媒体与 Telegram 快讯有出入时，必须单列段落进行研判。如果西方媒体与中文媒体（如南华早报、GoogleNews中文源）对同一事件有不同叙事，请明确指出【叙事差异研判】。
+4. 语言极其克制、专业，充满“地缘博弈”、“经济威慑”、“消耗战”等术语。
 5. 每条重要情报必须附带原文链接：`[参考来源](URL)`。
 
 【素材】：
@@ -165,7 +190,7 @@ def generate_ai_summary(news_text: str) -> str:
             model="deepseek-chat",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.6,
-            max_tokens=4000 # 解除字数封印，让它尽情写长文
+            max_tokens=4000
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -196,7 +221,7 @@ def main():
     print("写入 Supabase...")
     supabase.table("history").insert({
         "time": now_time,
-        "topic": "全球军政深度内参",
+        "topic": "全球军政经济内参",
         "summary": summary,
     }).execute()
 
