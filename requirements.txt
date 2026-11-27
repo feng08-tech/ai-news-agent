@@ -7,3 +7,4 @@ feedparser
 openai
 python-dotenv
 python-dateutil
+beautifulsoup4
