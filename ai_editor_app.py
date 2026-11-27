@@ -2,7 +2,7 @@ import streamlit as st
 import os
 import pandas as pd
 import folium
-from streamlit_folium import st_folium
+from streamlit.components.v1 import html  # 关键：绕过复杂的通信组件，直接渲染 HTML
 from supabase import create_client, Client
 
 st.set_page_config(page_title="全球政军情报主编", page_icon="🌍", layout="wide")
@@ -47,7 +47,7 @@ with st.sidebar:
                     supabase.table("history").delete().eq("id", item.get("id")).execute()
                     st.rerun()
 
-# ================= 3. 态势地图（Folium 稳定版） =================
+# ================= 3. 深色战术地图 (HTML 嵌入版) =================
 st.subheader("📍 全球主要热点态势追踪")
 
 hotspot_data = pd.DataFrame({
@@ -56,29 +56,29 @@ hotspot_data = pd.DataFrame({
     "lon": [30.52, 35.10, 51.39, 121.56, 36.23, 32.53]
 })
 
-# 创建地图，使用 CartoDB 的深色战术底图
+# 使用 folium 生成深色底图
 m = folium.Map(
-    location=[30, 50], # 中心点定在欧亚大陆交界
+    location=[30, 50], 
     zoom_start=3,
     tiles='https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     attr='CartoDB'
 )
 
-# 遍历数据，在地图上打点
+# 打上红点
 for idx, row in hotspot_data.iterrows():
     folium.CircleMarker(
         location=[row['lat'], row['lon']],
-        radius=6,
-        color='#ff4b4b',       # 边框红色
+        radius=8,
+        color='#ff4b4b',
         fill=True,
-        fill_color='#ff4b4b',  # 内部填充红色
+        fill_color='#ff4b4b',
         fill_opacity=0.8,
-        tooltip=row['name'],   # 鼠标悬浮显示中文
-        popup=row['name']      # 点击显示中文
+        tooltip=row['name'],
+        popup=row['name']
     ).add_to(m)
 
-# 渲染到 Streamlit
-st_folium(m, width="100%", height=400, returned_objects=[])
+# 核心黑科技：直接把地图转成纯 HTML 字符串塞进页面，Safari 绝对不卡！
+html(m._repr_html_(), height=450)
 
 st.divider()
 
