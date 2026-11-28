@@ -4,6 +4,8 @@ import pandas as pd
 import pydeck as pdk
 import requests
 import time
+import xml.etree.ElementTree as ET
+import urllib.parse
 from datetime import datetime
 from openai import OpenAI
 
@@ -64,31 +66,58 @@ def analyze_text(text: str, focus: str = "提炼要点、判断影响") -> str:
     )
     return resp.choices[0].message.content
 
-def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30):
-    # 强制请求间隔至少 6 秒
-    time.sleep(6)
-    
+# 🚀 新增：Google News 备用抓取器（稳定、速度快、不限流）
+def fetch_google_news(keyword: str, max_records: int = 20):
+    url = f"https://news.google.com/rss/search?q={urllib.parse.quote(keyword)}&hl=en-US&gl=US&ceid=US:en"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        res = requests.get(url, headers=headers, timeout=15)
+        res.raise_for_status()
+        root = ET.fromstring(res.content)
+        
+        articles = []
+        for item in root.findall(".//item"):
+            title = item.findtext("title")
+            link = item.findtext("link")
+            pub_date = item.findtext("pubDate")
+            
+            # 简单处理一下时间格式
+            try:
+                dt = datetime.strptime(pub_date, "%a, %d %b %Y %H:%M:%S %Z")
+                formatted_time = dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                formatted_time = pub_date
+                
+            articles.append({
+                "title": title,
+                "url": link,
+                "seendate": formatted_time,
+                "sourcecountry": "Global (Google News)"
+            })
+        return articles[:max_records]
+    except Exception as e:
+        return {"error": f"Google News 请求失败: {e}"}
+
+# 保留原 GDELT 用于备用
+def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 20):
+    time.sleep(2) # 稍微等一下
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
     query = keyword + (f" sourcecountry:{country_code}" if country_code else "")
     params = {"query": query, "mode": "artlist", "format": "json", "maxrecords": str(max_records), "sort": "datedesc"}
-    
     try:
         response = requests.get(url, params=params, timeout=(10, 60))
-        
         if response.status_code == 429:
-            return {"error": "❌ 接口繁忙（HTTP 429），当前 IP 被临时限流，请稍后再试。"}
-            
+            return {"error": "❌ GDELT 接口繁忙（429），自动切换 Google News..."}
         if not response.text.strip().startswith("{"):
-            return {"error": "❌ 触发了 GDELT 频率保护限制（非 JSON 响应）。请歇几分钟后再点。"}
-            
+            return {"error": "❌ GDELT 返回非 JSON 数据，自动切换..."}
         data = response.json()
-        if not isinstance(data, dict) or "articles" not in data: 
-            return []
+        if not isinstance(data, dict) or "articles" not in data: return []
         return data["articles"]
     except Exception as e: 
         return {"error": f"请求失败: {e}"}
 
-def render_gdelt_table(result):
+
+def render_news_table(result):
     if isinstance(result, dict) and "error" in result:
         st.error(result["error"])
     elif not result:
@@ -97,11 +126,19 @@ def render_gdelt_table(result):
         st.success(f"共获取到 {len(result)} 条最新报道！")
         df_data = []
         for art in result:
+            # 适配不同接口的字段名
             raw_time = art.get("seendate", "")
-            try: formatted_time = datetime.strptime(raw_time, "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%d %H:%M")
-            except: formatted_time = raw_time
-            df_data.append({"时间": formatted_time, "标题": art.get("title", "无标题"), "来源": art.get("sourcecountry", ""), "链接": art.get("url", "")})
-        st.dataframe(pd.DataFrame(df_data), column_config={"链接": st.column_config.LinkColumn("🔗 原文链接", display_text="点击阅读")}, use_container_width=True)
+            title = art.get("title", "无标题")
+            url = art.get("url", "")
+            
+            df_data.append({"时间": raw_time, "标题": title, "链接": url})
+            
+        st.dataframe(
+            pd.DataFrame(df_data), 
+            column_config={"链接": st.column_config.LinkColumn("🔗 原文链接", display_text="点击阅读")}, 
+            use_container_width=True,
+            hide_index=True
+        )
 
 # ================= 3. 侧边栏（历史库） =================
 with st.sidebar:
@@ -131,8 +168,9 @@ with st.sidebar:
                     st.rerun()
 
 # ================= 4. 页面主体 =================
-tab1, tab2, tab3 = st.tabs(["📊 情报指挥中心 (历史库)", "🎯 重点追踪 (你的关注)", "🌐 全球媒体实时搜索 (GDELT)"])
+tab1, tab2, tab3 = st.tabs(["📊 情报指挥中心 (历史库)", "🎯 重点追踪 (你的关注)", "🌐 全球媒体实时搜索"])
 
+# ---------------- Tab 1 ----------------
 with tab1:
     if history_data:
         latest = history_data[0]
@@ -198,18 +236,18 @@ with tab1:
                 st.divider()
                 st.markdown(latest_text)
 
+# ---------------- Tab 2 ----------------
 with tab2:
     st.subheader("🎯 重点人物与议题追踪")
-    st.write("点击下方对应模块的按钮获取最新动态（每次请求会自动排队等待 6 秒以防限流）。")
+    st.write("点击下方对应模块的按钮获取最新动态。")
     
-    # 已将美国总统锁定为特朗普，其他搜索词增加了防报错的双引号
     targets = {
-        "🇺🇸 美国总统(特朗普)": "(\"Donald Trump\" OR \"President Trump\" OR \"White House\")",
-        "🇷🇺 普京": "(\"Vladimir Putin\" OR \"President Putin\" OR Kremlin)",
-        "🇺🇸 黄仁勋": "(\"Jensen Huang\" OR \"Nvidia CEO\")",
-        "🚀 马斯克": "(\"Elon Musk\" OR Tesla OR SpaceX)",
-        "🇪🇺 欧盟动态": "((EU OR \"European Union\") AND (policy OR summit OR regulation OR economy))",
-        "💻 AI算力与芯片": "(\"AI computing\" OR \"AI chips\" OR semiconductor OR \"data center\" OR \"artificial intelligence\")"
+        "🇺🇸 美国总统(特朗普)": "\"Donald Trump\" OR \"President Trump\" OR \"White House\"",
+        "🇷🇺 普京": "\"Vladimir Putin\" OR \"President Putin\" OR Kremlin",
+        "🇺🇸 黄仁勋": "\"Jensen Huang\" OR \"Nvidia CEO\"",
+        "🚀 马斯克": "\"Elon Musk\" OR Tesla OR SpaceX",
+        "🇪🇺 欧盟动态": "(EU OR \"European Union\") AND (policy OR summit OR regulation OR economy)",
+        "💻 AI算力与芯片": "\"AI computing\" OR \"AI chips\" OR semiconductor OR \"data center\" OR \"artificial intelligence\""
     }
 
     for title, query in targets.items():
@@ -221,29 +259,31 @@ with tab2:
                 btn_clicked = st.button("🔄 获取最新情报", key=f"btn_{title}", use_container_width=True)
             
             if btn_clicked:
-                with st.spinner(f"正在请求 GDELT（约等待 6 秒）..."):
-                    res = fetch_gdelt_news(query, "", 20)
+                with st.spinner(f"正在获取 {title} 的最新情报..."):
+                    # 核心修改：因为 Streamlit 的 IP 被 GDELT 封了，这里优先使用 Google News
+                    res = fetch_google_news(query, 20)
                     st.session_state[f"track_{title}"] = res
             
             if f"track_{title}" in st.session_state:
-                render_gdelt_table(st.session_state[f"track_{title}"])
+                render_news_table(st.session_state[f"track_{title}"])
 
+# ---------------- Tab 3 ----------------
 with tab3:
-    st.subheader("🌐 GDELT 全球媒体实时检索")
+    st.subheader("🌐 全球媒体实时检索")
     
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2 = st.columns([3, 1])
     with col1:
-        gdelt_keyword = st.text_input("🔍 新闻关键词", "(AI OR technology)")
+        gdelt_keyword = st.text_input("🔍 新闻关键词", "AI OR technology")
     with col2:
-        country_map = {"全球": "", "美国": "US", "中国": "CN", "俄罗斯": "RU", "英国": "UK", "日本": "JA", "德国": "GM", "法国": "FR", "印度": "IN", "乌克兰": "UP"}
-        country_code = country_map[st.selectbox("🌐 限定国家", list(country_map.keys()))]
-    with col3:
-        gdelt_max = st.slider("📄 最大条数", 10, 100, 30)
+        search_source = st.selectbox("🌐 数据源", ["Google News (推荐，秒出)", "GDELT (可能被限流)"])
 
     if st.button("🚀 开始抓取", type="primary", use_container_width=True):
         if not gdelt_keyword.strip():
             st.warning("请输入关键词")
         else:
-            with st.spinner("正在向 GDELT 请求（约等待 6 秒）..."):
-                result = fetch_gdelt_news(gdelt_keyword, country_code, gdelt_max)
-            render_gdelt_table(result)
+            with st.spinner("正在请求数据..."):
+                if "Google" in search_source:
+                    result = fetch_google_news(gdelt_keyword, 30)
+                else:
+                    result = fetch_gdelt_news(gdelt_keyword, "", 30)
+            render_news_table(result)
