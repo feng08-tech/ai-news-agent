@@ -6,6 +6,8 @@ import requests
 from datetime import datetime
 from supabase import create_client, Client
 from openai import OpenAI
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 st.set_page_config(page_title="全球政军情报指挥中心", page_icon="🌍", layout="wide")
 st.title("🌍 全球政军情报指挥中心")
@@ -47,8 +49,26 @@ def analyze_text(text: str, focus: str = "提炼要点、判断影响、给出�
     )
     return resp.choices[0].message.content
 
+
+def get_gdelt_session():
+    """配置带有自动重试机制的 Requests Session"""
+    session = requests.Session()
+    # 遇到 429(限流), 500, 502, 503, 504 时重试，总共重试 3 次，每次等待时间指数增长
+    retry = Retry(
+        total=3, 
+        read=3, 
+        connect=3, 
+        backoff_factor=2, 
+        status_forcelist=[429, 500, 502, 503, 504]
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
 def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30):
-    """调用 GDELT DOC 2.0 API 获取新闻"""
+    """调用 GDELT DOC 2.0 API 获取新闻（带超时放宽与重试）"""
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
     query = keyword
     if country_code:
@@ -62,16 +82,28 @@ def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30
         "sort": "datedesc"
     }
     
+    session = get_gdelt_session()
+    
     try:
-        response = requests.get(url, params=params, timeout=10)
+        # 关键修改：连接超时 10 秒，读取超时延长至 60 秒
+        response = session.get(url, params=params, timeout=(10, 60))
         response.raise_for_status()
-        data = response.json()
+        
+        # GDELT 有时会返回 200 但内容不是 JSON（比如提示被限流的纯文本）
+        try:
+            data = response.json()
+        except ValueError:
+            return {"error": "GDELT 返回了非 JSON 数据（可能被限流），请稍等片刻再试，或更换英文关键词。"}
+            
         if not isinstance(data, dict) or "articles" not in data:
             return []
+            
         return data["articles"]
-    except Exception as e:
-        st.error(f"请求 GDELT 失败: {e}")
-        return []
+        
+    except requests.exceptions.Timeout:
+        return {"error": "GDELT 接口响应超时。该接口目前负载较高，请稍后再试或缩短关键词。"}
+    except requests.exceptions.RequestException as e:
+        return {"error": f"请求 GDELT 失败: {e}"}
 
 
 # ================= 3. 侧边栏（历史库） =================
@@ -208,10 +240,11 @@ with tab1:
 with tab2:
     st.subheader("🌐 GDELT 全球媒体实时检索")
     st.write("检索全球 100+ 种语言的新闻报道，数据每 15 分钟更新一次。")
+    st.info("💡 提示：英文关键词（如 AI, semiconductor, Ukraine）在 GDELT 的检索效果远好于中文。如果遇到 429 或超时，系统会自动重试，请耐心等待。")
 
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
-        gdelt_keyword = st.text_input("🔍 新闻关键词（支持 OR 逻辑）", "台海 OR 半导体")
+        gdelt_keyword = st.text_input("🔍 新闻关键词（支持 OR 逻辑）", "AI OR technology")
     with col2:
         country_map = {
             "全球": "", "美国": "US", "中国": "CN", "俄罗斯": "RU", "英国": "UK",
@@ -226,15 +259,19 @@ with tab2:
         if not gdelt_keyword.strip():
             st.warning("请输入关键词")
         else:
-            with st.spinner("正在向 GDELT 请求全球数据..."):
-                articles = fetch_gdelt_news(gdelt_keyword, country_code, gdelt_max)
+            with st.spinner("正在向 GDELT 请求全球数据（接口可能较慢，请稍候）..."):
+                result = fetch_gdelt_news(gdelt_keyword, country_code, gdelt_max)
                 
-            if not articles:
+            # 处理错误返回（字典形式）
+            if isinstance(result, dict) and "error" in result:
+                st.error(result["error"])
+            elif not result:
                 st.info("没有找到相关新闻，尝试更换关键词或国家。")
             else:
-                st.success(f"共获取到 {len(articles)} 条最新报道！")
+                # 正常处理列表数据
+                st.success(f"共获取到 {len(result)} 条最新报道！")
                 df_data = []
-                for art in articles:
+                for art in result:
                     raw_time = art.get("seendate", "")
                     try:
                         dt = datetime.strptime(raw_time, "%Y%m%dT%H%M%SZ")
