@@ -8,3 +8,4 @@ openai
 python-dotenv
 python-dateutil
 beautifulsoup4
+bcrypt
