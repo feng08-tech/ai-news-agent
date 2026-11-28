@@ -10,14 +10,13 @@ from openai import OpenAI
 
 st.set_page_config(page_title="全球政军情报指挥中心", page_icon="🌍", layout="wide")
 
-# ================= 0. 极简密码登录模块 =================
+# ================= 0. 极简密码登录 =================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
     st.title("🔐 全球政军情报指挥中心 - 访问受限")
     password_input = st.text_input("请输入访问密码：", type="password")
-    
     if st.button("登录系统", type="primary"):
         if password_input == st.secrets.get("APP_PASSWORD", "123456"):
             st.session_state.logged_in = True
@@ -26,13 +25,16 @@ if not st.session_state.logged_in:
             st.error("❌ 密码错误。")
     st.stop()
 
-# ================= 1. 配置与连接（附带自动清洗错误字符） =================
-# 强行读取并清洗 URL（去掉前后的空格，去掉末尾多余的斜杠）
-raw_url = st.secrets.get("SUPABASE_URL", "")
-supabase_url = str(raw_url).strip().rstrip("/")
-# 如果用户不小心填了带 /rest/v1/ 的网址，这里自动帮他切掉
-if "/rest/v1/" in supabase_url:
-    supabase_url = supabase_url.split("/rest/v1/")[0]
+# ================= 1. 终极容错配置与连接 =================
+# 无论你在 Secrets 里填了多长、带没带斜杠、带没带 http，这里都会自动清洗
+raw_url = str(st.secrets.get("SUPABASE_URL", "")).strip()
+if not raw_url.startswith("http"):
+    raw_url = "https://" + raw_url
+# 核心清洗：只保留到 .supabase.co 为止
+if ".supabase.co" in raw_url:
+    supabase_url = raw_url.split(".supabase.co")[0] + ".supabase.co"
+else:
+    supabase_url = raw_url.rstrip("/")
 
 supabase_key = str(st.secrets.get("SUPABASE_KEY", "")).strip()
 deepseek_key = str(st.secrets.get("DEEPSEEK_API_KEY", "")).strip()
@@ -57,7 +59,7 @@ with st.sidebar:
         st.rerun()
 
 # ================= 2. 核心函数 =================
-def analyze_text(text: str, focus: str = "提炼要点、判断影响、给出后续观察指标") -> str:
+def analyze_text(text: str, focus: str = "提炼要点、判断影响") -> str:
     if not deepseek_key:
         raise RuntimeError("未配置 DEEPSEEK_API_KEY。")
     client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com")
@@ -76,9 +78,7 @@ def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30
         st.session_state['last_gdelt_request'] = 0.0
     elapsed = time.time() - st.session_state['last_gdelt_request']
     if elapsed < 6.0:
-        wait_time = 6.0 - elapsed
-        st.info(f"⏳ 冷却等待 {wait_time:.1f} 秒...")
-        time.sleep(wait_time)
+        time.sleep(6.0 - elapsed)
 
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
     query = keyword + (f" sourcecountry:{country_code}" if country_code else "")
@@ -109,13 +109,11 @@ with st.sidebar:
 
     st.header("☁️ 历史情报库")
     try:
-        # 发起请求
         response = supabase.table("history").select("*").order("time", desc=True).execute()
         history_data = response.data or []
     except Exception as e:
         st.error(f"读取云端失败: {e}")
-        # 报错时强行打印出系统到底在连哪个网址，方便排查
-        st.write(f"👉 **系统正在尝试连接:** `{supabase_url}`")
+        st.write(f"👉 **系统清洗后尝试连接的纯净网址:** `{supabase_url}`")
         history_data = []
 
     if not history_data:
@@ -123,7 +121,6 @@ with st.sidebar:
     else:
         for item in history_data:
             with st.expander(f"🕒 {item.get('time', '未知时间')}"):
-                # 字段名兼容：不管叫 summary 还是 topic，都能读出来
                 text_preview = item.get("summary") or item.get("topic") or item.get("content") or "无内容"
                 st.markdown(str(text_preview)[:300] + "...")
                 if st.button("🗑️ 删除", key=f"del_{item.get('id')}"):
@@ -155,7 +152,6 @@ with tab1:
 
     if keyword:
         kw = keyword.strip().lower()
-        # 搜索时兼容多个字段名
         matched = [
             item for item in history_data
             if kw in str(item.get("topic") or "").lower() or kw in str(item.get("summary") or "").lower() or kw in str(item.get("content") or "").lower()
