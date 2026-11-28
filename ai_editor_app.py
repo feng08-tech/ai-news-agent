@@ -5,7 +5,6 @@ import pydeck as pdk
 import requests
 import time
 from datetime import datetime
-from supabase import create_client, Client
 from openai import OpenAI
 
 st.set_page_config(page_title="全球政军情报指挥中心", page_icon="🌍", layout="wide")
@@ -25,29 +24,24 @@ if not st.session_state.logged_in:
             st.error("❌ 密码错误。")
     st.stop()
 
-# ================= 1. 终极容错配置与连接 =================
-# 无论你在 Secrets 里填了多长、带没带斜杠、带没带 http，这里都会自动清洗
+# ================= 1. 配置（强制使用 REST API 方式） =================
 raw_url = str(st.secrets.get("SUPABASE_URL", "")).strip()
-if not raw_url.startswith("http"):
-    raw_url = "https://" + raw_url
-# 核心清洗：只保留到 .supabase.co 为止
-if ".supabase.co" in raw_url:
-    supabase_url = raw_url.split(".supabase.co")[0] + ".supabase.co"
-else:
-    supabase_url = raw_url.rstrip("/")
-
 supabase_key = str(st.secrets.get("SUPABASE_KEY", "")).strip()
 deepseek_key = str(st.secrets.get("DEEPSEEK_API_KEY", "")).strip()
 
-if not supabase_url or not supabase_key:
-    st.error("⚠️ 配置缺失：请在 Secrets 中填写 SUPABASE_URL 和 SUPABASE_KEY。")
-    st.stop()
+# 强行拼接出 REST API 的完整地址
+if ".supabase.co" in raw_url:
+    base_domain = raw_url.split(".supabase.co")[0] + ".supabase.co"
+    REST_URL = f"{base_domain}/rest/v1/history"
+else:
+    REST_URL = raw_url.rstrip("/") + "/rest/v1/history"
 
-try:
-    supabase: Client = create_client(supabase_url, supabase_key)
-except Exception as e:
-    st.error(f"❌ 数据库初始化失败: {e}")
-    st.stop()
+HEADERS = {
+    "apikey": supabase_key,
+    "Authorization": f"Bearer {supabase_key}",
+    "Content-Type": "application/json",
+    "Prefer": "return=representation"
+}
 
 st.title("🌍 全球政军情报指挥中心")
 st.write("后台每日自动抓取、AI 研判并写入云端；支持读取展示、历史搜索与全球媒体实时检索。")
@@ -79,28 +73,21 @@ def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30
     elapsed = time.time() - st.session_state['last_gdelt_request']
     if elapsed < 6.0:
         time.sleep(6.0 - elapsed)
-
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
     query = keyword + (f" sourcecountry:{country_code}" if country_code else "")
     params = {"query": query, "mode": "artlist", "format": "json", "maxrecords": str(max_records), "sort": "datedesc"}
-    
     try:
         st.session_state['last_gdelt_request'] = time.time()
         response = requests.get(url, params=params, timeout=(10, 60))
-        if response.status_code == 429:
-            return {"error": "❌ GDELT 接口繁忙（429），请休息几分钟后再试。"}
+        if response.status_code == 429: return {"error": "❌ GDELT 接口繁忙，请稍后再试。"}
         response.raise_for_status()
-        try:
-            data = response.json()
-        except ValueError:
-            return {"error": "❌ GDELT 返回非标准数据，可能被限流。"}
-        if not isinstance(data, dict) or "articles" not in data:
-            return []
+        try: data = response.json()
+        except ValueError: return {"error": "❌ GDELT 返回非标准数据，可能被限流。"}
+        if not isinstance(data, dict) or "articles" not in data: return []
         return data["articles"]
-    except Exception as e:
-        return {"error": f"请求失败: {e}"}
+    except Exception as e: return {"error": f"请求失败: {e}"}
 
-# ================= 3. 侧边栏（历史库） =================
+# ================= 3. 侧边栏（直接用 HTTP 查库） =================
 with st.sidebar:
     st.header("🔍 手动搜索（历史库）")
     keyword = st.text_input("输入历史库关键词", placeholder="例如：台海、俄乌")
@@ -108,13 +95,19 @@ with st.sidebar:
     st.divider()
 
     st.header("☁️ 历史情报库")
+    history_data = []
     try:
-        response = supabase.table("history").select("*").order("time", desc=True).execute()
-        history_data = response.data or []
+        # 使用 requests 直接请求 REST API
+        response = requests.get(f"{REST_URL}?select=*&order=time.desc", headers=HEADERS, timeout=10)
+        if response.status_code == 200:
+            history_data = response.json()
+        else:
+            st.error(f"读取数据失败，状态码：{response.status_code}")
+            st.write(f"👉 **完整请求地址:** `{REST_URL}`")
+            st.write(f"👉 **服务器返回内容:** `{response.text}`")
     except Exception as e:
-        st.error(f"读取云端失败: {e}")
-        st.write(f"👉 **系统清洗后尝试连接的纯净网址:** `{supabase_url}`")
-        history_data = []
+        st.error(f"网络连接彻底失败: {e}")
+        st.write(f"👉 **完整请求地址:** `{REST_URL}`")
 
     if not history_data:
         st.info("暂无历史记录。")
@@ -124,7 +117,8 @@ with st.sidebar:
                 text_preview = item.get("summary") or item.get("topic") or item.get("content") or "无内容"
                 st.markdown(str(text_preview)[:300] + "...")
                 if st.button("🗑️ 删除", key=f"del_{item.get('id')}"):
-                    supabase.table("history").delete().eq("id", item.get("id")).execute()
+                    del_url = f"{REST_URL}?id=eq.{item.get('id')}"
+                    requests.delete(del_url, headers=HEADERS)
                     st.rerun()
 
 # ================= 4. 页面主体 =================
@@ -152,10 +146,7 @@ with tab1:
 
     if keyword:
         kw = keyword.strip().lower()
-        matched = [
-            item for item in history_data
-            if kw in str(item.get("topic") or "").lower() or kw in str(item.get("summary") or "").lower() or kw in str(item.get("content") or "").lower()
-        ][:search_limit]
+        matched = [item for item in history_data if kw in str(item.get("topic") or "").lower() or kw in str(item.get("summary") or "").lower() or kw in str(item.get("content") or "").lower()][:search_limit]
 
         st.subheader(f"🔍 历史库搜索结果：{keyword}（{len(matched)} 条）")
         if not matched:
@@ -164,10 +155,8 @@ with tab1:
             if st.button("📝 生成主题简报", key="brief_btn"):
                 material = "\n\n".join([f"主题：{item.get('topic', '')}\n内容：{str(item.get('summary') or item.get('content') or '')[:800]}" for item in matched[:10]])
                 with st.spinner("正在生成主题简报..."):
-                    try:
-                        st.session_state["search_brief"] = analyze_text(material, focus="汇总相关动态、判断趋势")
-                    except Exception as e:
-                        st.error(f"简报生成失败：{e}")
+                    try: st.session_state["search_brief"] = analyze_text(material, focus="汇总相关动态、判断趋势")
+                    except Exception as e: st.error(f"简报生成失败：{e}")
 
             if st.session_state.get("search_brief"):
                 with st.container(border=True):
@@ -182,14 +171,10 @@ with tab1:
                     st.subheader(f"📌 {item.get('topic', '无标题')}")
                     st.caption(f"时间：{item.get('time', '未知')}")
                     st.markdown(full_text[:1000] + ("..." if len(full_text) > 1000 else ""))
-                    
                     if st.button("🤖 AI 分析这条", key=f"ai_{item_id}"):
                         with st.spinner("分析中..."):
-                            try:
-                                st.session_state[f"analysis_{item_id}"] = analyze_text(full_text)
-                            except Exception as e:
-                                st.error(f"分析失败：{e}")
-                                
+                            try: st.session_state[f"analysis_{item_id}"] = analyze_text(full_text)
+                            except Exception as e: st.error(f"分析失败：{e}")
                     if st.session_state.get(f"analysis_{item_id}"):
                         st.markdown("#### 🤖 AI 分析")
                         st.markdown(st.session_state[f"analysis_{item_id}"])
@@ -207,32 +192,23 @@ with tab1:
 with tab2:
     st.subheader("🌐 GDELT 全球媒体实时检索")
     col1, col2, col3 = st.columns([2, 1, 1])
-    with col1:
-        gdelt_keyword = st.text_input("🔍 新闻关键词", "AI OR technology")
+    with col1: gdelt_keyword = st.text_input("🔍 新闻关键词", "AI OR technology")
     with col2:
         country_map = {"全球": "", "美国": "US", "中国": "CN", "俄罗斯": "RU", "英国": "UK", "日本": "JA", "德国": "GM", "法国": "FR", "印度": "IN", "乌克兰": "UP"}
         country_code = country_map[st.selectbox("🌐 限定国家", list(country_map.keys()))]
-    with col3:
-        gdelt_max = st.slider("📄 最大条数", 10, 100, 30)
+    with col3: gdelt_max = st.slider("📄 最大条数", 10, 100, 30)
 
     if st.button("🚀 开始抓取", type="primary", use_container_width=True):
         with st.spinner("正在向 GDELT 请求..."):
             result = fetch_gdelt_news(gdelt_keyword, country_code, gdelt_max)
-            
-        if isinstance(result, dict) and "error" in result:
-            st.error(result["error"])
-        elif not result:
-            st.info("没有找到相关新闻。")
+        if isinstance(result, dict) and "error" in result: st.error(result["error"])
+        elif not result: st.info("没有找到相关新闻。")
         else:
             st.success(f"共获取到 {len(result)} 条！")
             df_data = []
             for art in result:
                 raw_time = art.get("seendate", "")
-                try:
-                    dt = datetime.strptime(raw_time, "%Y%m%dT%H%M%SZ")
-                    formatted_time = dt.strftime("%Y-%m-%d %H:%M")
-                except:
-                    formatted_time = raw_time
+                try: formatted_time = datetime.strptime(raw_time, "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%d %H:%M")
+                except: formatted_time = raw_time
                 df_data.append({"时间": formatted_time, "标题": art.get("title", "无标题"), "来源": art.get("sourcecountry", ""), "链接": art.get("url", "")})
-            
             st.dataframe(pd.DataFrame(df_data), column_config={"链接": st.column_config.LinkColumn("🔗 原文链接", display_text="点击阅读")}, use_container_width=True)
