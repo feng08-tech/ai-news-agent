@@ -5,6 +5,8 @@ import pydeck as pdk
 import requests
 import time
 from datetime import datetime
+import psycopg2
+from urllib.parse import urlparse, urlunparse
 from openai import OpenAI
 
 st.set_page_config(page_title="全球政军情报指挥中心", page_icon="🌍", layout="wide")
@@ -24,24 +26,21 @@ if not st.session_state.logged_in:
             st.error("❌ 密码错误。")
     st.stop()
 
-# ================= 1. 配置（强制使用 REST API 方式） =================
-raw_url = str(st.secrets.get("SUPABASE_URL", "")).strip()
-supabase_key = str(st.secrets.get("SUPABASE_KEY", "")).strip()
-deepseek_key = str(st.secrets.get("DEEPSEEK_API_KEY", "")).strip()
+# ================= 1. 配置（使用连接池） =================
+# ⚠️ 请将下方字符串替换为你从 Supabase 复制的 Session pooler 连接串
+DATABASE_URL = st.secrets.get("DATABASE_URL")
+deepseek_key = st.secrets.get("DEEPSEEK_API_KEY", "")
 
-# 强行拼接出 REST API 的完整地址
-if ".supabase.co" in raw_url:
-    base_domain = raw_url.split(".supabase.co")[0] + ".supabase.co"
-    REST_URL = f"{base_domain}/rest/v1/history"
-else:
-    REST_URL = raw_url.rstrip("/") + "/rest/v1/history"
+if not DATABASE_URL:
+    st.error("⚠️ 配置缺失：请在 Secrets 中添加 DATABASE_URL。")
+    st.stop()
 
-HEADERS = {
-    "apikey": supabase_key,
-    "Authorization": f"Bearer {supabase_key}",
-    "Content-Type": "application/json",
-    "Prefer": "return=representation"
-}
+try:
+    conn = psycopg2.connect(DATABASE_URL)
+    cursor = conn.cursor()
+except Exception as e:
+    st.error(f"❌ 数据库连接失败: {e}")
+    st.stop()
 
 st.title("🌍 全球政军情报指挥中心")
 st.write("后台每日自动抓取、AI 研判并写入云端；支持读取展示、历史搜索与全球媒体实时检索。")
@@ -87,7 +86,7 @@ def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30
         return data["articles"]
     except Exception as e: return {"error": f"请求失败: {e}"}
 
-# ================= 3. 侧边栏（直接用 HTTP 查库） =================
+# ================= 3. 侧边栏（历史库） =================
 with st.sidebar:
     st.header("🔍 手动搜索（历史库）")
     keyword = st.text_input("输入历史库关键词", placeholder="例如：台海、俄乌")
@@ -97,17 +96,13 @@ with st.sidebar:
     st.header("☁️ 历史情报库")
     history_data = []
     try:
-        # 使用 requests 直接请求 REST API
-        response = requests.get(f"{REST_URL}?select=*&order=time.desc", headers=HEADERS, timeout=10)
-        if response.status_code == 200:
-            history_data = response.json()
-        else:
-            st.error(f"读取数据失败，状态码：{response.status_code}")
-            st.write(f"👉 **完整请求地址:** `{REST_URL}`")
-            st.write(f"👉 **服务器返回内容:** `{response.text}`")
+        cursor.execute("SELECT * FROM history ORDER BY time DESC;")
+        columns = [desc[0] for desc in cursor.description]
+        history_data = [dict(zip(columns, row)) for row in cursor.fetchall()]
     except Exception as e:
-        st.error(f"网络连接彻底失败: {e}")
-        st.write(f"👉 **完整请求地址:** `{REST_URL}`")
+        st.error(f"读取数据失败: {e}")
+        # 打印详细错误帮助排查
+        st.write(f"👉 **尝试连接的地址:** `{urlparse(DATABASE_URL).netloc}`")
 
     if not history_data:
         st.info("暂无历史记录。")
@@ -117,9 +112,12 @@ with st.sidebar:
                 text_preview = item.get("summary") or item.get("topic") or item.get("content") or "无内容"
                 st.markdown(str(text_preview)[:300] + "...")
                 if st.button("🗑️ 删除", key=f"del_{item.get('id')}"):
-                    del_url = f"{REST_URL}?id=eq.{item.get('id')}"
-                    requests.delete(del_url, headers=HEADERS)
-                    st.rerun()
+                    try:
+                        cursor.execute("DELETE FROM history WHERE id = %s;", (item.get('id'),))
+                        conn.commit()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"删除失败: {e}")
 
 # ================= 4. 页面主体 =================
 tab1, tab2 = st.tabs(["📊 情报指挥中心 (历史库)", "🌐 全球媒体实时搜索 (GDELT)"])
@@ -212,3 +210,8 @@ with tab2:
                 except: formatted_time = raw_time
                 df_data.append({"时间": formatted_time, "标题": art.get("title", "无标题"), "来源": art.get("sourcecountry", ""), "链接": art.get("url", "")})
             st.dataframe(pd.DataFrame(df_data), column_config={"链接": st.column_config.LinkColumn("🔗 原文链接", display_text="点击阅读")}, use_container_width=True)
+
+# 关闭数据库连接
+if 'conn' in locals() and conn:
+    cursor.close()
+    conn.close()
