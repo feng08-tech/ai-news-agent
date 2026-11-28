@@ -7,12 +7,10 @@ import time
 from datetime import datetime
 from supabase import create_client, Client
 from openai import OpenAI
-import bcrypt
 
-# 必须放在所有 st 调用的最前面
 st.set_page_config(page_title="全球政军情报指挥中心", page_icon="🌍", layout="wide")
 
-# ================= 0. 安全密码登录模块 =================
+# ================= 0. 极简明文密码登录模块 =================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
@@ -23,23 +21,14 @@ if not st.session_state.logged_in:
     password_input = st.text_input("访问密码", type="password")
     
     if st.button("登录系统", type="primary"):
-        try:
-            # 从 Secrets 获取哈希值
-            stored_hash = st.secrets.get("APP_PASSWORD_HASH")
-            if not stored_hash:
-                st.error("系统配置错误：未在 Secrets 中配置 APP_PASSWORD_HASH。")
-            else:
-                # 校验密码
-                if bcrypt.checkpw(password_input.encode('utf-8'), stored_hash.encode('utf-8')):
-                    st.session_state.logged_in = True
-                    st.rerun()  # 登录成功，刷新页面进入主程序
-                else:
-                    st.error("❌ 密码错误，请重试。")
-        except Exception as e:
-            st.error(f"登录模块异常：{e}")
+        # 直接对比明文密码
+        if password_input == st.secrets.get("APP_PASSWORD"):
+            st.session_state.logged_in = True
+            st.rerun()
+        else:
+            st.error("❌ 密码错误，请重试（注意不要输入多余的空格）。")
             
-    # 如果未登录，后面的代码全部停止执行
-    st.stop()
+    st.stop()  # 如果未登录，后面的代码全部停止执行
 
 # ================= 1. 配置与连接 =================
 # 走到这里说明已经登录成功
@@ -64,7 +53,7 @@ except Exception as e:
 st.title("🌍 全球政军情报指挥中心")
 st.write("后台每日自动抓取、AI 研判并写入云端；支持读取展示、历史搜索与全球媒体实时检索。")
 
-# 增加一个退出登录按钮（放在侧边栏最下面）
+# 侧边栏退出登录按钮
 with st.sidebar:
     st.divider()
     if st.button("🚪 退出登录", use_container_width=True):
