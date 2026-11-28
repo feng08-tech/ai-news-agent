@@ -66,7 +66,6 @@ def analyze_text(text: str, focus: str = "提炼要点、判断影响") -> str:
     )
     return resp.choices[0].message.content
 
-# 给 GDELT 抓取加了 10 分钟缓存，防止同一个词重复请求导致被封 IP
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30):
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
@@ -194,38 +193,34 @@ with tab1:
                 st.markdown(latest_text)
 
 
-# ---------------- Tab 2: 重点对象追踪（为你定制） ----------------
+# ---------------- Tab 2: 重点对象追踪（已拆分） ----------------
 with tab2:
     st.subheader("🎯 重点人物与议题追踪")
-    st.write("点击下方对应模块的按钮，即可实时抓取全球外媒关于该对象的最新动态（为防止接口限流，结果会缓存 10 分钟）。")
+    st.write("点击下方对应模块的按钮，即可实时抓取全球外媒关于该对象的最新动态（结果会缓存 10 分钟以保护接口）。")
     
-    # 定义你关注的对象和搜索词
+    # 将“欧盟”和“AI算力”彻底拆开为两个独立模块
     targets = {
         "🇺🇸 美国总统": "Trump OR Biden OR 'US President' OR White House",
         "🇷🇺 普京": "Vladimir Putin OR Kremlin OR Russia President",
         "🇺🇸 黄仁勋": "Jensen Huang OR Nvidia CEO",
         "🚀 马斯克": "Elon Musk OR Tesla OR SpaceX",
-        "🇪🇺 欧盟AI算力": "'European Union' AND (AI OR 'Artificial Intelligence') AND (computing OR chips OR semiconductor)"
+        "🇪🇺 欧盟动态": "(EU OR 'European Union') AND (policy OR summit OR regulation OR economy)",
+        "💻 AI算力与芯片": "('AI computing' OR 'AI chips' OR semiconductor OR 'data center' OR 'artificial intelligence')"
     }
 
-    # 遍历生成每个追踪模块
     for title, query in targets.items():
         with st.container(border=True):
             col_title, col_btn = st.columns([3, 1])
             with col_title:
                 st.subheader(title)
             with col_btn:
-                # 独一无二的 key
                 btn_clicked = st.button("🔄 获取最新情报", key=f"btn_{title}", use_container_width=True)
             
-            # 如果点击了按钮，或者 session_state 里已经有缓存，就展示
             if btn_clicked:
                 with st.spinner(f"正在全球搜索 {title} ..."):
-                    # 这里复用前面的抓取函数
                     res = fetch_gdelt_news(query, "", 20)
                     st.session_state[f"track_{title}"] = res
             
-            # 从 session_state 中读取并渲染
             if f"track_{title}" in st.session_state:
                 render_gdelt_table(st.session_state[f"track_{title}"])
 
