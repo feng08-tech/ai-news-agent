@@ -7,12 +7,42 @@ import time
 from datetime import datetime
 from supabase import create_client, Client
 from openai import OpenAI
+import bcrypt
 
+# 必须放在所有 st 调用的最前面
 st.set_page_config(page_title="全球政军情报指挥中心", page_icon="🌍", layout="wide")
-st.title("🌍 全球政军情报指挥中心")
-st.write("后台每日自动抓取、AI 研判并写入云端；支持读取展示、历史搜索与全球媒体实时检索。")
+
+# ================= 0. 安全密码登录模块 =================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    st.title("🔐 全球政军情报指挥中心 - 访问受限")
+    st.write("请输入访问密码以查看内部情报：")
+    
+    password_input = st.text_input("访问密码", type="password")
+    
+    if st.button("登录系统", type="primary"):
+        try:
+            # 从 Secrets 获取哈希值
+            stored_hash = st.secrets.get("APP_PASSWORD_HASH")
+            if not stored_hash:
+                st.error("系统配置错误：未在 Secrets 中配置 APP_PASSWORD_HASH。")
+            else:
+                # 校验密码
+                if bcrypt.checkpw(password_input.encode('utf-8'), stored_hash.encode('utf-8')):
+                    st.session_state.logged_in = True
+                    st.rerun()  # 登录成功，刷新页面进入主程序
+                else:
+                    st.error("❌ 密码错误，请重试。")
+        except Exception as e:
+            st.error(f"登录模块异常：{e}")
+            
+    # 如果未登录，后面的代码全部停止执行
+    st.stop()
 
 # ================= 1. 配置与连接 =================
+# 走到这里说明已经登录成功
 try:
     supabase_url = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
     supabase_key = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
@@ -31,10 +61,18 @@ except Exception as e:
     st.error(f"❌ 数据库连接失败: {e}")
     st.stop()
 
+st.title("🌍 全球政军情报指挥中心")
+st.write("后台每日自动抓取、AI 研判并写入云端；支持读取展示、历史搜索与全球媒体实时检索。")
+
+# 增加一个退出登录按钮（放在侧边栏最下面）
+with st.sidebar:
+    st.divider()
+    if st.button("🚪 退出登录", use_container_width=True):
+        st.session_state.logged_in = False
+        st.rerun()
 
 # ================= 2. 核心函数 =================
 def analyze_text(text: str, focus: str = "提炼要点、判断影响、给出后续观察指标") -> str:
-    """调用 DeepSeek 对给定文本做分析。"""
     if not deepseek_key:
         raise RuntimeError("未配置 DEEPSEEK_API_KEY，请在 Secrets 中添加。")
     client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com")
@@ -48,11 +86,8 @@ def analyze_text(text: str, focus: str = "提炼要点、判断影响、给出�
     )
     return resp.choices[0].message.content
 
-
 def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30):
     """调用 GDELT API，包含 6 秒强制冷却限制，防止触发 429 封禁"""
-    
-    # 1. 强制全局冷却机制
     if 'last_gdelt_request' not in st.session_state:
         st.session_state['last_gdelt_request'] = 0.0
 
@@ -78,19 +113,14 @@ def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30
     }
     
     try:
-        # 更新最后请求时间
         st.session_state['last_gdelt_request'] = time.time()
-        
-        # 连接超时 10 秒，读取超时 60 秒（GDELT 接口有时很慢）
         response = requests.get(url, params=params, timeout=(10, 60))
         
-        # 如果是 429 错误，直接返回友好提示
         if response.status_code == 429:
             return {"error": "❌ GDELT 接口繁忙（429），当前 IP 被限流。请休息几分钟后再试，或更换关键词。"}
             
         response.raise_for_status()
         
-        # 检查是否返回了非 JSON 格式的文本（通常也是被限流的警告）
         try:
             data = response.json()
         except ValueError:
@@ -105,7 +135,6 @@ def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30
         return {"error": "⏱️ GDELT 接口响应超时。该接口目前负载较高，请稍后再试。"}
     except Exception as e:
         return {"error": f"请求失败: {e}"}
-
 
 # ================= 3. 侧边栏（历史库） =================
 with st.sidebar:
@@ -132,7 +161,6 @@ with st.sidebar:
                 if st.button("🗑️ 删除", key=f"del_{item.get('id')}"):
                     supabase.table("history").delete().eq("id", item.get("id")).execute()
                     st.rerun()
-
 
 # ================= 4. 页面主体（分 Tab） =================
 tab1, tab2 = st.tabs(["📊 情报指挥中心 (历史库)", "🌐 全球媒体实时搜索 (GDELT)"])
@@ -235,7 +263,6 @@ with tab1:
                     st.markdown(summary_text)
                 else:
                     st.warning("最新记录里没有 summary 字段。")
-
 
 # ---------------- Tab 2: 全球媒体搜索 ----------------
 with tab2:
