@@ -30,8 +30,26 @@ if missing:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ================= 2. 全球无死角信源矩阵（包含中国深度视角） =================
+# ================= 2. 全球无死角信源矩阵（新增 AI/芯片/算力） =================
 feeds = {
+    # --- 🧠 AI、芯片与算力霸权 ---
+    "GoogleNews AI地缘与军事化": "https://news.google.com/rss/search?q=AI+geopolitics+OR+military+AI+OR+AI+compute+sovereignty&hl=en-US&gl=US&ceid=US:en",
+    "GoogleNews 芯片战争与半导体": "https://news.google.com/rss/search?q=chip+export+controls+OR+semiconductor+war+OR+TSMC+OR+ASML&hl=en-US&gl=US&ceid=US:en",
+
+    # --- 🇺🇸 美国内政与两党博弈追踪 ---
+    "GoogleNews 美国民主党动态": "https://news.google.com/rss/search?q=US+Democrats+OR+Democratic+Party+OR+White+House+Democrats&hl=en-US&gl=US&ceid=US:en",
+    "GoogleNews 美国共和党动态": "https://news.google.com/rss/search?q=US+Republicans+OR+GOP+OR+Republican+Party&hl=en-US&gl=US&ceid=US:en",
+    "GoogleNews 美国会与法案": "https://news.google.com/rss/search?q=US+Congress+OR+Senate+OR+House+of+Representatives&hl=en-US&gl=US&ceid=US:en",
+    "GoogleNews 特朗普/白宫动态": "https://news.google.com/rss/search?q=Trump+OR+White+House+OR+US+President&hl=en-US&gl=US&ceid=US:en",
+
+    # --- 🌟 全球核心热点人物追踪 ---
+    "GoogleNews 普京/克宫动态": "https://news.google.com/rss/search?q=Putin+OR+Kremlin+OR+Russia+President&hl=en-US&gl=US&ceid=US:en",
+    "GoogleNews 伊朗高层动态": "https://news.google.com/rss/search?q=Iran+President+OR+Khamenei+OR+IRGC&hl=en-US&gl=US&ceid=US:en",
+    "GoogleNews 日本首相动态": "https://news.google.com/rss/search?q=Japan+Prime+Minister+OR+Japanese+PM+OR+Japan+Cabinet&hl=en-US&gl=US&ceid=US:en",
+    "GoogleNews 欧盟高层动态": "https://news.google.com/rss/search?q=EU+Commission+OR+Ursula+von+der+Leyen+OR+European+Council&hl=en-US&gl=US&ceid=US:en",
+    "GoogleNews 马斯克动态": "https://news.google.com/rss/search?q=Elon+Musk+OR+SpaceX+OR+Starlink+OR+Tesla&hl=en-US&gl=US&ceid=US:en",
+    "GoogleNews 黄仁勋/英伟达": "https://news.google.com/rss/search?q=Jensen+Huang+OR+Nvidia+OR+AI+chips+export&hl=en-US&gl=US&ceid=US:en",
+
     # --- 中国核心视角与中文资讯 ---
     "GoogleNews 中国军事": "https://news.google.com/rss/search?q=解放军+OR+中国军方+OR+中国国防部&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
     "GoogleNews 台海动态": "https://news.google.com/rss/search?q=台海+OR+台湾+演习+OR+军售&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
@@ -72,11 +90,11 @@ feeds = {
     "GoogleNews 极地地缘": "https://news.google.com/rss/search?q=Arctic+military+OR+Antarctica+geopolitics&hl=en-US&gl=US&ceid=US:en",
 }
 
-# ================= 新增：Telegram 公开频道 =================
+# ================= Telegram 公开频道 =================
 tg_channels = [
-    "Osinttechnical",   # 装备与战况开源情报
-    "sentdefender",     # 全球防务与突发快讯
-    "wartranslated",    # 俄乌前线战报翻译
+    "Osinttechnical",
+    "sentdefender",
+    "wartranslated",
 ]
 
 headers = {
@@ -164,22 +182,24 @@ def fetch_all_news() -> str:
                 pass
     return all_news_text
 
-# ================= 4. 终极全球视野 Prompt =================
+# ================= 4. 终极全球视野 Prompt（新增 AI 与算力板块） =================
 def generate_ai_summary(news_text: str) -> str:
     client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=180.0)
     prompt = f"""你是一位顶级地缘政治智库的首席分析师。请根据以下全球最新素材，撰写一份极其详尽、具有战略纵深的《全球军政与经济深度内参》。
 
 【写作要求】：
 1. 绝对不要写流水账！必须深挖事件背后的动机，并预测下一步走向。
-2. 必须包含以下六大板块，篇幅要长，内容要硬核。如果某板块当天确实没有新闻素材，请注明“本日该区域态势平稳”，严禁遗漏板块：
+2. 必须包含以下八大板块，篇幅要长，内容要硬核。如果某板块当天确实没有新闻素材，请注明“本日该区域态势平稳”，严禁遗漏板块：
    ## 🌍 一、宏观战略定调 (当前全球最大风险与底层逻辑)
    ## 🔥 二、核心战区动态推演 (俄乌、中东、印太。重点分析台海与南海动态，提取武器型号并结合 Telegram 快讯推演)
-   ## 💰 三、地缘经济与制裁博弈 (中美经贸、科技战、军费、制裁、能源、供应链武器化)
+   ## 💰 三、地缘经济与制裁博弈 (中美经贸、军费、制裁、能源、供应链武器化)
    ## 🌐 四、边缘地带扫描 (重点扫描：拉美、非洲、南北极。分析区域冲突、资源争夺与大国渗透)
-   ## 🤝 五、大国交锋与外交暗战 (中美俄欧最新法案背后的真实筹码，中国外交的最新动向)
-   ## ⚙️ 六、军工前沿与战争形态 (AI、无人机、新型弹药在实战中的演进，以及中国军工的突破)
-3. 强化【情报交叉验证】：当正规媒体与 Telegram 快讯有出入时，必须单列段落进行研判。如果西方媒体与中文媒体（如南华早报、GoogleNews中文源）对同一事件有不同叙事，请明确指出【叙事差异研判】。
-4. 语言极其克制、专业，充满“地缘博弈”、“经济威慑”、“消耗战”等术语。
+   ## 🤝 五、美国内政与两党博弈 (深度剖析民主党和共和党在对外政策、内部法案上的最新交锋及外溢影响)
+   ## 🧠 六、AI、芯片与算力霸权 (核心新增！分析全球半导体供应链争夺、美国芯片出口管制的最新动向、各国 AI 算力基础设施的军事化布局、以及中美科技脱钩的实质性进展)
+   ## ⚙️ 七、军工前沿与战争形态 (AI武器化、无人机蜂群、新型弹药在实战中的演进，以及中国军工的突破)
+   ## 🎯 八、关键人物动态追踪 (必写板块！重点提取：美、俄、伊朗、日、欧盟最高层政策言论；追踪马斯克的科技动向、黄仁勋的AI芯片布局，并研判其全球影响)
+3. 强化【情报交叉验证】：当正规媒体与 Telegram 快讯有出入时，必须单列段落进行研判。如果西方媒体与中文媒体对同一事件有不同叙事，请明确指出【叙事差异研判】。
+4. 语言极其克制、专业，充满“地缘博弈”、“经济威慑”、“算力铁幕”、“消耗战”等术语。
 5. 每条重要情报必须附带原文链接：`[参考来源](URL)`。
 
 【素材】：
