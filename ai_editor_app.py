@@ -66,15 +66,13 @@ def analyze_text(text: str, focus: str = "提炼要点、判断影响") -> str:
     )
     return resp.choices[0].message.content
 
-# 🚀 新增：调用 AI 批量翻译标题
 @st.cache_data(ttl=3600, show_spinner=False)
 def translate_titles(titles_tuple):
     if not deepseek_key or not titles_tuple:
         return list(titles_tuple)
     
-    # 拼接批量翻译的 Prompt
     prompt = "请将以下英文新闻标题翻译成中文，保持新闻简报的专业客观风格。请严格按行返回翻译结果，不要包含任何序号、解释或额外空行，只输出翻译后的纯文本。\n\n"
-    for i, t in enumerate(titles_tuple):
+    for t in titles_tuple:
         prompt += f"{t}\n"
         
     try:
@@ -89,12 +87,9 @@ def translate_titles(titles_tuple):
         )
         result_text = resp.choices[0].message.content.strip()
         translated = [line.strip() for line in result_text.split('\n') if line.strip()]
-        
-        # 如果 AI 返回的行数对不上，说明翻译出错了，直接返回原文
         if len(translated) == len(titles_tuple):
             return translated
-        else:
-            return list(titles_tuple)
+        return list(titles_tuple)
     except Exception:
         return list(titles_tuple)
 
@@ -136,46 +131,53 @@ def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 20
     try:
         response = requests.get(url, params=params, timeout=(10, 60))
         if response.status_code == 429:
-            return {"error": "❌ GDELT 接口繁忙（429），请稍后再试或切换数据源。"}
+            return {"error": "❌ GDELT 接口繁忙（429），请切换 Google News。"}
         if not response.text.strip().startswith("{"):
-            return {"error": "❌ GDELT 返回非 JSON 数据，自动切换..."}
+            return {"error": "❌ GDELT 返回非 JSON 数据，被限流。"}
         data = response.json()
         if not isinstance(data, dict) or "articles" not in data: return []
         return data["articles"]
     except Exception as e: 
         return {"error": f"请求失败: {e}"}
 
-# 🚀 修改：带翻译的数据表渲染
-def render_news_table(result):
+# 🚀 核心升级：改成卡片折叠式展示，可以直接看详情并让AI单条分析
+def render_news_cards(result, tab_prefix=""):
     if isinstance(result, dict) and "error" in result:
         st.error(result["error"])
-    elif not result:
+        return
+    if not result:
         st.info("没有找到相关新闻。")
-    else:
-        st.success(f"共获取到 {len(result)} 条最新报道！")
+        return
         
-        # 提取所有英文标题
-        raw_titles = [art.get("title", "") for art in result]
+    st.success(f"共获取到 {len(result)} 条最新报道（点击卡片展开详情与AI深度解析）！")
+    
+    raw_titles = [art.get("title", "") for art in result]
+    with st.spinner("AI 正在为您翻译中文标题..."):
+        translated_titles = translate_titles(tuple(raw_titles))
         
-        # 调用 AI 翻译
-        with st.spinner("AI 正在为您翻译中文标题..."):
-            translated_titles = translate_titles(tuple(raw_titles))
+    for i, art in enumerate(result):
+        title_zh = translated_titles[i] if i < len(translated_titles) else "翻译失败"
+        title_en = art.get("title", "无标题")
+        url = art.get("url", "")
+        time_str = art.get("seendate", "")
         
-        df_data = []
-        for i, art in enumerate(result):
-            df_data.append({
-                "中文标题": translated_titles[i] if i < len(translated_titles) else "翻译失败",
-                "英文原标": art.get("title", "无标题"),
-                "时间": art.get("seendate", ""),
-                "链接": art.get("url", "")
-            })
+        # 展开卡片
+        with st.expander(f"🕒 {time_str} | {title_zh}"):
+            st.write(f"**英文原标：** {title_en}")
+            st.link_button("🔗 点击阅读外媒原网页", url)
+            st.divider()
             
-        st.dataframe(
-            pd.DataFrame(df_data), 
-            column_config={"链接": st.column_config.LinkColumn("🔗 原文链接", display_text="点击阅读")}, 
-            use_container_width=True,
-            hide_index=True
-        )
+            # 单条 AI 分析按钮，使用 hash 确保 key 绝对唯一
+            btn_key = f"analyze_news_{tab_prefix}_{i}_{hash(url)}"
+            if st.button("🤖 让 AI 推测此新闻的背景与影响", key=btn_key):
+                with st.spinner("AI 正在深度研判中..."):
+                    prompt = f"外媒最新报道：{title_en} (中文译名：{title_zh})。请基于这条新闻标题，推测该事件的背景信息、可能产生的地缘政治/经济影响，并列出后续观察指标。"
+                    try:
+                        analysis = analyze_text(prompt)
+                        st.markdown("### 🤖 AI 研判结果")
+                        st.markdown(analysis)
+                    except Exception as e:
+                        st.error(f"分析失败：{e}")
 
 # ================= 3. 侧边栏（历史库） =================
 with st.sidebar:
@@ -274,7 +276,7 @@ with tab1:
 
 with tab2:
     st.subheader("🎯 重点人物与议题追踪")
-    st.write("点击下方对应模块的按钮获取最新动态（系统会自动将英文标题翻译为中文）。")
+    st.write("点击下方模块获取最新动态（系统会自动翻译，并支持点开单条让AI深度研判）。")
     
     targets = {
         "🇺🇸 美国总统(特朗普)": "\"Donald Trump\" OR \"President Trump\" OR \"White House\"",
@@ -295,11 +297,12 @@ with tab2:
             
             if btn_clicked:
                 with st.spinner(f"正在获取 {title} 的最新情报..."):
-                    res = fetch_google_news(query, 20)
+                    res = fetch_google_news(query, 15) # 15条足够看
                     st.session_state[f"track_{title}"] = res
             
             if f"track_{title}" in st.session_state:
-                render_news_table(st.session_state[f"track_{title}"])
+                # 传入 tab_prefix 防止 key 冲突
+                render_news_cards(st.session_state[f"track_{title}"], tab_prefix=title)
 
 with tab3:
     st.subheader("🌐 全球媒体实时检索")
@@ -316,7 +319,7 @@ with tab3:
         else:
             with st.spinner("正在请求数据..."):
                 if "Google" in search_source:
-                    result = fetch_google_news(gdelt_keyword, 30)
+                    result = fetch_google_news(gdelt_keyword, 20)
                 else:
-                    result = fetch_gdelt_news(gdelt_keyword, "", 30)
-            render_news_table(result)
+                    result = fetch_gdelt_news(gdelt_keyword, "", 20)
+            render_news_cards(result, tab_prefix="search")
