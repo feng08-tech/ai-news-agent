@@ -6,7 +6,6 @@ import requests
 import time
 from datetime import datetime
 from openai import OpenAI
-import urllib.parse
 
 st.set_page_config(page_title="全球政军情报指挥中心", page_icon="🌍", layout="wide")
 
@@ -33,7 +32,6 @@ else:
     domain = raw_url
 
 api_url = f"https://{domain}/rest/v1/history" if not domain.startswith("http") else f"{domain}/rest/v1/history"
-
 supabase_key = str(st.secrets.get("SUPABASE_KEY", "")).strip()
 deepseek_key = str(st.secrets.get("DEEPSEEK_API_KEY", "")).strip()
 
@@ -66,20 +64,29 @@ def analyze_text(text: str, focus: str = "提炼要点、判断影响") -> str:
     )
     return resp.choices[0].message.content
 
-@st.cache_data(ttl=600, show_spinner=False)
 def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30):
+    # 强制请求间隔至少 6 秒
+    time.sleep(6)
+    
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
     query = keyword + (f" sourcecountry:{country_code}" if country_code else "")
     params = {"query": query, "mode": "artlist", "format": "json", "maxrecords": str(max_records), "sort": "datedesc"}
+    
     try:
         response = requests.get(url, params=params, timeout=(10, 60))
-        if response.status_code == 429: return {"error": "❌ GDELT 接口繁忙（429），请等待几分钟后再试。"}
-        response.raise_for_status()
-        try: data = response.json()
-        except ValueError: return {"error": "❌ GDELT 返回非标准数据，可能被限流。"}
-        if not isinstance(data, dict) or "articles" not in data: return []
+        
+        if response.status_code == 429:
+            return {"error": "❌ 接口繁忙（HTTP 429），当前 IP 被临时限流，请稍后再试。"}
+            
+        if not response.text.strip().startswith("{"):
+            return {"error": "❌ 触发了 GDELT 频率保护限制（非 JSON 响应）。请歇几分钟后再点。"}
+            
+        data = response.json()
+        if not isinstance(data, dict) or "articles" not in data: 
+            return []
         return data["articles"]
-    except Exception as e: return {"error": f"请求失败: {e}"}
+    except Exception as e: 
+        return {"error": f"请求失败: {e}"}
 
 def render_gdelt_table(result):
     if isinstance(result, dict) and "error" in result:
@@ -126,7 +133,6 @@ with st.sidebar:
 # ================= 4. 页面主体 =================
 tab1, tab2, tab3 = st.tabs(["📊 情报指挥中心 (历史库)", "🎯 重点追踪 (你的关注)", "🌐 全球媒体实时搜索 (GDELT)"])
 
-# ---------------- Tab 1: 情报指挥中心 ----------------
 with tab1:
     if history_data:
         latest = history_data[0]
@@ -192,20 +198,18 @@ with tab1:
                 st.divider()
                 st.markdown(latest_text)
 
-
-# ---------------- Tab 2: 重点对象追踪（已拆分） ----------------
 with tab2:
     st.subheader("🎯 重点人物与议题追踪")
-    st.write("点击下方对应模块的按钮，即可实时抓取全球外媒关于该对象的最新动态（结果会缓存 10 分钟以保护接口）。")
+    st.write("点击下方对应模块的按钮获取最新动态（每次请求会自动排队等待 6 秒以防限流）。")
     
-    # 将“欧盟”和“AI算力”彻底拆开为两个独立模块
+    # 已将美国总统锁定为特朗普，其他搜索词增加了防报错的双引号
     targets = {
-        "🇺🇸 美国总统": "Trump OR Biden OR 'US President' OR White House",
-        "🇷🇺 普京": "Vladimir Putin OR Kremlin OR Russia President",
-        "🇺🇸 黄仁勋": "Jensen Huang OR Nvidia CEO",
-        "🚀 马斯克": "Elon Musk OR Tesla OR SpaceX",
-        "🇪🇺 欧盟动态": "(EU OR 'European Union') AND (policy OR summit OR regulation OR economy)",
-        "💻 AI算力与芯片": "('AI computing' OR 'AI chips' OR semiconductor OR 'data center' OR 'artificial intelligence')"
+        "🇺🇸 美国总统(特朗普)": "(\"Donald Trump\" OR \"President Trump\" OR \"White House\")",
+        "🇷🇺 普京": "(\"Vladimir Putin\" OR \"President Putin\" OR Kremlin)",
+        "🇺🇸 黄仁勋": "(\"Jensen Huang\" OR \"Nvidia CEO\")",
+        "🚀 马斯克": "(\"Elon Musk\" OR Tesla OR SpaceX)",
+        "🇪🇺 欧盟动态": "((EU OR \"European Union\") AND (policy OR summit OR regulation OR economy))",
+        "💻 AI算力与芯片": "(\"AI computing\" OR \"AI chips\" OR semiconductor OR \"data center\" OR \"artificial intelligence\")"
     }
 
     for title, query in targets.items():
@@ -217,21 +221,19 @@ with tab2:
                 btn_clicked = st.button("🔄 获取最新情报", key=f"btn_{title}", use_container_width=True)
             
             if btn_clicked:
-                with st.spinner(f"正在全球搜索 {title} ..."):
+                with st.spinner(f"正在请求 GDELT（约等待 6 秒）..."):
                     res = fetch_gdelt_news(query, "", 20)
                     st.session_state[f"track_{title}"] = res
             
             if f"track_{title}" in st.session_state:
                 render_gdelt_table(st.session_state[f"track_{title}"])
 
-
-# ---------------- Tab 3: 全球媒体实时搜索 ----------------
 with tab3:
     st.subheader("🌐 GDELT 全球媒体实时检索")
     
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
-        gdelt_keyword = st.text_input("🔍 新闻关键词", "AI OR technology")
+        gdelt_keyword = st.text_input("🔍 新闻关键词", "(AI OR technology)")
     with col2:
         country_map = {"全球": "", "美国": "US", "中国": "CN", "俄罗斯": "RU", "英国": "UK", "日本": "JA", "德国": "GM", "法国": "FR", "印度": "IN", "乌克兰": "UP"}
         country_code = country_map[st.selectbox("🌐 限定国家", list(country_map.keys()))]
@@ -242,6 +244,6 @@ with tab3:
         if not gdelt_keyword.strip():
             st.warning("请输入关键词")
         else:
-            with st.spinner("正在向 GDELT 请求..."):
+            with st.spinner("正在向 GDELT 请求（约等待 6 秒）..."):
                 result = fetch_gdelt_news(gdelt_keyword, country_code, gdelt_max)
             render_gdelt_table(result)
