@@ -59,7 +59,7 @@ def analyze_text(text: str, focus: str = "提炼要点、判断影响") -> str:
     resp = client.chat.completions.create(
         model="deepseek-chat",
         messages=[
-            {"role": "system", "content": "你是一名严谨的军政情报分析助手，只基于给定材料分析，不编造。"},
+            {"role": "system", "content": "你是一名严谨的军政与经济情报分析助手，只基于给定材料分析，不编造。"},
             {"role": "user", "content": f"请基于以下内容进行分析。重点：{focus}\n\n{text}"}
         ],
         temperature=0.3
@@ -140,7 +140,6 @@ def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 20
     except Exception as e: 
         return {"error": f"请求失败: {e}"}
 
-# 🚀 核心升级：改成卡片折叠式展示，可以直接看详情并让AI单条分析
 def render_news_cards(result, tab_prefix=""):
     if isinstance(result, dict) and "error" in result:
         st.error(result["error"])
@@ -161,13 +160,11 @@ def render_news_cards(result, tab_prefix=""):
         url = art.get("url", "")
         time_str = art.get("seendate", "")
         
-        # 展开卡片
         with st.expander(f"🕒 {time_str} | {title_zh}"):
             st.write(f"**英文原标：** {title_en}")
             st.link_button("🔗 点击阅读外媒原网页", url)
             st.divider()
             
-            # 单条 AI 分析按钮，使用 hash 确保 key 绝对唯一
             btn_key = f"analyze_news_{tab_prefix}_{i}_{hash(url)}"
             if st.button("🤖 让 AI 推测此新闻的背景与影响", key=btn_key):
                 with st.spinner("AI 正在深度研判中..."):
@@ -278,13 +275,15 @@ with tab2:
     st.subheader("🎯 重点人物与议题追踪")
     st.write("点击下方模块获取最新动态（系统会自动翻译，并支持点开单条让AI深度研判）。")
     
+    # 🚀 新增了“📈 全球经济动态”模块
     targets = {
         "🇺🇸 美国总统(特朗普)": "\"Donald Trump\" OR \"President Trump\" OR \"White House\"",
         "🇷🇺 普京": "\"Vladimir Putin\" OR \"President Putin\" OR Kremlin",
         "🇺🇸 黄仁勋": "\"Jensen Huang\" OR \"Nvidia CEO\"",
         "🚀 马斯克": "\"Elon Musk\" OR Tesla OR SpaceX",
         "🇪🇺 欧盟动态": "(EU OR \"European Union\") AND (policy OR summit OR regulation OR economy)",
-        "💻 AI算力与芯片": "\"AI computing\" OR \"AI chips\" OR semiconductor OR \"data center\" OR \"artificial intelligence\""
+        "💻 AI算力与芯片": "\"AI computing\" OR \"AI chips\" OR semiconductor OR \"data center\" OR \"artificial intelligence\"",
+        "📈 全球经济动态": "economy OR inflation OR \"interest rate\" OR GDP OR \"global trade\" OR recession OR \"financial market\""
     }
 
     for title, query in targets.items():
@@ -297,11 +296,10 @@ with tab2:
             
             if btn_clicked:
                 with st.spinner(f"正在获取 {title} 的最新情报..."):
-                    res = fetch_google_news(query, 15) # 15条足够看
+                    res = fetch_google_news(query, 15)
                     st.session_state[f"track_{title}"] = res
             
             if f"track_{title}" in st.session_state:
-                # 传入 tab_prefix 防止 key 冲突
                 render_news_cards(st.session_state[f"track_{title}"], tab_prefix=title)
 
 with tab3:
