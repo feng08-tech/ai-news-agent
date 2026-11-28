@@ -26,9 +26,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ================= 1. 配置 =================
-# 强行提取并清洗 URL，杜绝拼写错误
 raw_url = str(st.secrets.get("SUPABASE_URL", "")).strip().lower()
-# 如果用户填了长串，自动切出干净的域名
 if "supabase.co" in raw_url:
     domain = raw_url.split("supabase.co")[0] + "supabase.co"
 else:
@@ -68,25 +66,36 @@ def analyze_text(text: str, focus: str = "提炼要点、判断影响") -> str:
     )
     return resp.choices[0].message.content
 
+# 给 GDELT 抓取加了 10 分钟缓存，防止同一个词重复请求导致被封 IP
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 30):
-    if 'last_gdelt_request' not in st.session_state:
-        st.session_state['last_gdelt_request'] = 0.0
-    elapsed = time.time() - st.session_state['last_gdelt_request']
-    if elapsed < 6.0:
-        time.sleep(6.0 - elapsed)
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
     query = keyword + (f" sourcecountry:{country_code}" if country_code else "")
     params = {"query": query, "mode": "artlist", "format": "json", "maxrecords": str(max_records), "sort": "datedesc"}
     try:
-        st.session_state['last_gdelt_request'] = time.time()
         response = requests.get(url, params=params, timeout=(10, 60))
-        if response.status_code == 429: return {"error": "❌ GDELT 接口繁忙，请稍后再试。"}
+        if response.status_code == 429: return {"error": "❌ GDELT 接口繁忙（429），请等待几分钟后再试。"}
         response.raise_for_status()
         try: data = response.json()
         except ValueError: return {"error": "❌ GDELT 返回非标准数据，可能被限流。"}
         if not isinstance(data, dict) or "articles" not in data: return []
         return data["articles"]
     except Exception as e: return {"error": f"请求失败: {e}"}
+
+def render_gdelt_table(result):
+    if isinstance(result, dict) and "error" in result:
+        st.error(result["error"])
+    elif not result:
+        st.info("没有找到相关新闻。")
+    else:
+        st.success(f"共获取到 {len(result)} 条最新报道！")
+        df_data = []
+        for art in result:
+            raw_time = art.get("seendate", "")
+            try: formatted_time = datetime.strptime(raw_time, "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%d %H:%M")
+            except: formatted_time = raw_time
+            df_data.append({"时间": formatted_time, "标题": art.get("title", "无标题"), "来源": art.get("sourcecountry", ""), "链接": art.get("url", "")})
+        st.dataframe(pd.DataFrame(df_data), column_config={"链接": st.column_config.LinkColumn("🔗 原文链接", display_text="点击阅读")}, use_container_width=True)
 
 # ================= 3. 侧边栏（历史库） =================
 with st.sidebar:
@@ -98,17 +107,11 @@ with st.sidebar:
     st.header("☁️ 历史情报库")
     history_data = []
     try:
-        # 直接用 requests 请求，不依赖任何第三方 SDK
         res = requests.get(f"{api_url}?select=*&order=time.desc", headers=HEADERS, timeout=10)
         if res.status_code == 200:
             history_data = res.json()
-        else:
-            st.error(f"读取失败，状态码: {res.status_code}")
-            st.write(f"👉 **请求地址:** `{api_url}`")
-            st.write(f"👉 **服务器返回:** `{res.text}`")
     except Exception as e:
         st.error(f"网络错误: {e}")
-        st.write(f"👉 **请求地址:** `{api_url}`")
 
     if not history_data:
         st.info("暂无历史记录。")
@@ -122,8 +125,9 @@ with st.sidebar:
                     st.rerun()
 
 # ================= 4. 页面主体 =================
-tab1, tab2 = st.tabs(["📊 情报指挥中心 (历史库)", "🌐 全球媒体实时搜索 (GDELT)"])
+tab1, tab2, tab3 = st.tabs(["📊 情报指挥中心 (历史库)", "🎯 重点追踪 (你的关注)", "🌐 全球媒体实时搜索 (GDELT)"])
 
+# ---------------- Tab 1: 情报指挥中心 ----------------
 with tab1:
     if history_data:
         latest = history_data[0]
@@ -189,26 +193,60 @@ with tab1:
                 st.divider()
                 st.markdown(latest_text)
 
+
+# ---------------- Tab 2: 重点对象追踪（为你定制） ----------------
 with tab2:
+    st.subheader("🎯 重点人物与议题追踪")
+    st.write("点击下方对应模块的按钮，即可实时抓取全球外媒关于该对象的最新动态（为防止接口限流，结果会缓存 10 分钟）。")
+    
+    # 定义你关注的对象和搜索词
+    targets = {
+        "🇺🇸 美国总统": "Trump OR Biden OR 'US President' OR White House",
+        "🇷🇺 普京": "Vladimir Putin OR Kremlin OR Russia President",
+        "🇺🇸 黄仁勋": "Jensen Huang OR Nvidia CEO",
+        "🚀 马斯克": "Elon Musk OR Tesla OR SpaceX",
+        "🇪🇺 欧盟AI算力": "'European Union' AND (AI OR 'Artificial Intelligence') AND (computing OR chips OR semiconductor)"
+    }
+
+    # 遍历生成每个追踪模块
+    for title, query in targets.items():
+        with st.container(border=True):
+            col_title, col_btn = st.columns([3, 1])
+            with col_title:
+                st.subheader(title)
+            with col_btn:
+                # 独一无二的 key
+                btn_clicked = st.button("🔄 获取最新情报", key=f"btn_{title}", use_container_width=True)
+            
+            # 如果点击了按钮，或者 session_state 里已经有缓存，就展示
+            if btn_clicked:
+                with st.spinner(f"正在全球搜索 {title} ..."):
+                    # 这里复用前面的抓取函数
+                    res = fetch_gdelt_news(query, "", 20)
+                    st.session_state[f"track_{title}"] = res
+            
+            # 从 session_state 中读取并渲染
+            if f"track_{title}" in st.session_state:
+                render_gdelt_table(st.session_state[f"track_{title}"])
+
+
+# ---------------- Tab 3: 全球媒体实时搜索 ----------------
+with tab3:
     st.subheader("🌐 GDELT 全球媒体实时检索")
+    
     col1, col2, col3 = st.columns([2, 1, 1])
-    with col1: gdelt_keyword = st.text_input("🔍 新闻关键词", "AI OR technology")
+    with col1:
+        gdelt_keyword = st.text_input("🔍 新闻关键词", "AI OR technology")
     with col2:
         country_map = {"全球": "", "美国": "US", "中国": "CN", "俄罗斯": "RU", "英国": "UK", "日本": "JA", "德国": "GM", "法国": "FR", "印度": "IN", "乌克兰": "UP"}
         country_code = country_map[st.selectbox("🌐 限定国家", list(country_map.keys()))]
-    with col3: gdelt_max = st.slider("📄 最大条数", 10, 100, 30)
+    with col3:
+        gdelt_max = st.slider("📄 最大条数", 10, 100, 30)
 
     if st.button("🚀 开始抓取", type="primary", use_container_width=True):
-        with st.spinner("正在向 GDELT 请求..."):
-            result = fetch_gdelt_news(gdelt_keyword, country_code, gdelt_max)
-        if isinstance(result, dict) and "error" in result: st.error(result["error"])
-        elif not result: st.info("没有找到相关新闻。")
+        if not gdelt_keyword.strip():
+            st.warning("请输入关键词")
         else:
-            st.success(f"共获取到 {len(result)} 条！")
-            df_data = []
-            for art in result:
-                raw_time = art.get("seendate", "")
-                try: formatted_time = datetime.strptime(raw_time, "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%d %H:%M")
-                except: formatted_time = raw_time
-                df_data.append({"时间": formatted_time, "标题": art.get("title", "无标题"), "来源": art.get("sourcecountry", ""), "链接": art.get("url", "")})
-            st.dataframe(pd.DataFrame(df_data), column_config={"链接": st.column_config.LinkColumn("🔗 原文链接", display_text="点击阅读")}, use_container_width=True)
+            with st.spinner("正在向 GDELT 请求..."):
+                result = fetch_gdelt_news(gdelt_keyword, country_code, gdelt_max)
+            render_gdelt_table(result)
