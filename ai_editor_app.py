@@ -66,7 +66,38 @@ def analyze_text(text: str, focus: str = "提炼要点、判断影响") -> str:
     )
     return resp.choices[0].message.content
 
-# 🚀 新增：Google News 备用抓取器（稳定、速度快、不限流）
+# 🚀 新增：调用 AI 批量翻译标题
+@st.cache_data(ttl=3600, show_spinner=False)
+def translate_titles(titles_tuple):
+    if not deepseek_key or not titles_tuple:
+        return list(titles_tuple)
+    
+    # 拼接批量翻译的 Prompt
+    prompt = "请将以下英文新闻标题翻译成中文，保持新闻简报的专业客观风格。请严格按行返回翻译结果，不要包含任何序号、解释或额外空行，只输出翻译后的纯文本。\n\n"
+    for i, t in enumerate(titles_tuple):
+        prompt += f"{t}\n"
+        
+    try:
+        client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com")
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "你是一名专业的国际新闻翻译。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1
+        )
+        result_text = resp.choices[0].message.content.strip()
+        translated = [line.strip() for line in result_text.split('\n') if line.strip()]
+        
+        # 如果 AI 返回的行数对不上，说明翻译出错了，直接返回原文
+        if len(translated) == len(titles_tuple):
+            return translated
+        else:
+            return list(titles_tuple)
+    except Exception:
+        return list(titles_tuple)
+
 def fetch_google_news(keyword: str, max_records: int = 20):
     url = f"https://news.google.com/rss/search?q={urllib.parse.quote(keyword)}&hl=en-US&gl=US&ceid=US:en"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -81,7 +112,6 @@ def fetch_google_news(keyword: str, max_records: int = 20):
             link = item.findtext("link")
             pub_date = item.findtext("pubDate")
             
-            # 简单处理一下时间格式
             try:
                 dt = datetime.strptime(pub_date, "%a, %d %b %Y %H:%M:%S %Z")
                 formatted_time = dt.strftime("%Y-%m-%d %H:%M")
@@ -92,22 +122,21 @@ def fetch_google_news(keyword: str, max_records: int = 20):
                 "title": title,
                 "url": link,
                 "seendate": formatted_time,
-                "sourcecountry": "Global (Google News)"
+                "sourcecountry": "Global"
             })
         return articles[:max_records]
     except Exception as e:
         return {"error": f"Google News 请求失败: {e}"}
 
-# 保留原 GDELT 用于备用
 def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 20):
-    time.sleep(2) # 稍微等一下
+    time.sleep(2)
     url = "https://api.gdeltproject.org/api/v2/doc/doc"
     query = keyword + (f" sourcecountry:{country_code}" if country_code else "")
     params = {"query": query, "mode": "artlist", "format": "json", "maxrecords": str(max_records), "sort": "datedesc"}
     try:
         response = requests.get(url, params=params, timeout=(10, 60))
         if response.status_code == 429:
-            return {"error": "❌ GDELT 接口繁忙（429），自动切换 Google News..."}
+            return {"error": "❌ GDELT 接口繁忙（429），请稍后再试或切换数据源。"}
         if not response.text.strip().startswith("{"):
             return {"error": "❌ GDELT 返回非 JSON 数据，自动切换..."}
         data = response.json()
@@ -116,7 +145,7 @@ def fetch_gdelt_news(keyword: str, country_code: str = "", max_records: int = 20
     except Exception as e: 
         return {"error": f"请求失败: {e}"}
 
-
+# 🚀 修改：带翻译的数据表渲染
 def render_news_table(result):
     if isinstance(result, dict) and "error" in result:
         st.error(result["error"])
@@ -124,14 +153,22 @@ def render_news_table(result):
         st.info("没有找到相关新闻。")
     else:
         st.success(f"共获取到 {len(result)} 条最新报道！")
+        
+        # 提取所有英文标题
+        raw_titles = [art.get("title", "") for art in result]
+        
+        # 调用 AI 翻译
+        with st.spinner("AI 正在为您翻译中文标题..."):
+            translated_titles = translate_titles(tuple(raw_titles))
+        
         df_data = []
-        for art in result:
-            # 适配不同接口的字段名
-            raw_time = art.get("seendate", "")
-            title = art.get("title", "无标题")
-            url = art.get("url", "")
-            
-            df_data.append({"时间": raw_time, "标题": title, "链接": url})
+        for i, art in enumerate(result):
+            df_data.append({
+                "中文标题": translated_titles[i] if i < len(translated_titles) else "翻译失败",
+                "英文原标": art.get("title", "无标题"),
+                "时间": art.get("seendate", ""),
+                "链接": art.get("url", "")
+            })
             
         st.dataframe(
             pd.DataFrame(df_data), 
@@ -170,7 +207,6 @@ with st.sidebar:
 # ================= 4. 页面主体 =================
 tab1, tab2, tab3 = st.tabs(["📊 情报指挥中心 (历史库)", "🎯 重点追踪 (你的关注)", "🌐 全球媒体实时搜索"])
 
-# ---------------- Tab 1 ----------------
 with tab1:
     if history_data:
         latest = history_data[0]
@@ -236,10 +272,9 @@ with tab1:
                 st.divider()
                 st.markdown(latest_text)
 
-# ---------------- Tab 2 ----------------
 with tab2:
     st.subheader("🎯 重点人物与议题追踪")
-    st.write("点击下方对应模块的按钮获取最新动态。")
+    st.write("点击下方对应模块的按钮获取最新动态（系统会自动将英文标题翻译为中文）。")
     
     targets = {
         "🇺🇸 美国总统(特朗普)": "\"Donald Trump\" OR \"President Trump\" OR \"White House\"",
@@ -260,14 +295,12 @@ with tab2:
             
             if btn_clicked:
                 with st.spinner(f"正在获取 {title} 的最新情报..."):
-                    # 核心修改：因为 Streamlit 的 IP 被 GDELT 封了，这里优先使用 Google News
                     res = fetch_google_news(query, 20)
                     st.session_state[f"track_{title}"] = res
             
             if f"track_{title}" in st.session_state:
                 render_news_table(st.session_state[f"track_{title}"])
 
-# ---------------- Tab 3 ----------------
 with tab3:
     st.subheader("🌐 全球媒体实时检索")
     
@@ -275,7 +308,7 @@ with tab3:
     with col1:
         gdelt_keyword = st.text_input("🔍 新闻关键词", "AI OR technology")
     with col2:
-        search_source = st.selectbox("🌐 数据源", ["Google News (推荐，秒出)", "GDELT (可能被限流)"])
+        search_source = st.selectbox("🌐 数据源", ["Google News (推荐)", "GDELT"])
 
     if st.button("🚀 开始抓取", type="primary", use_container_width=True):
         if not gdelt_keyword.strip():
